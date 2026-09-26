@@ -18,15 +18,15 @@ TEMPLATES = {
     "PROJECT_RULES.md": "# {{PROJECT_NAME}} rules\n{{TIMEZONE}} / {{LANGUAGE}}\n{{PROJECT_SCOPE}}\n{{ENVIRONMENT_RULE}}\n{{DIRECTORY_TABLE}}\n{{OUTPUT_RULES}}\n{{ORIGINAL_RULES}}\n",
 }
 LAYOUT = {
-    "research": "Breast cancer literature review",
+    "scope": "Module documentation",
     "directories": [
-        {"path": "breast-cancer/work", "purpose": "Working notes"},
-        {"path": "breast-cancer/reference", "purpose": "Original papers"},
-        {"path": "breast-cancer/reports", "purpose": "Reports and slide decks"},
+        {"path": "module-a/work", "purpose": "Working notes"},
+        {"path": "module-a/reference", "purpose": "Original documents"},
+        {"path": "module-a/reports", "purpose": "Reports and slide decks"},
     ],
     "environment": None,
-    "outputs": ["breast-cancer/reports"],
-    "originals": ["breast-cancer/reference"],
+    "outputs": ["module-a/reports"],
+    "originals": ["module-a/reference"],
 }
 
 
@@ -35,7 +35,7 @@ class RulesTests(unittest.TestCase):
         runs = Path(tempfile.gettempdir()) / "project-directory-organizer-tests"
         runs.mkdir(exist_ok=True)
         self.case = Path(tempfile.mkdtemp(prefix="rules-", dir=runs))
-        self.root = self.case / "癌症"
+        self.root = self.case / "示例项目"
         self.root.mkdir()
         self.bundle = self.case / "bundle"
         (self.bundle / "scripts").mkdir(parents=True)
@@ -50,6 +50,8 @@ class RulesTests(unittest.TestCase):
 
     def call(self, *args, success=True, layout=LAYOUT, payload=None):
         args = list(args)
+        if args and args[0] == "plan" and "--timezone" not in args:
+            args.extend(("--timezone", "UTC"))
         if args and args[0] == "plan" and layout is not None and "--layout-file" not in args:
             path = self.case / "selected-layout.json"
             path.write_text(json.dumps(layout, ensure_ascii=True), encoding="utf-8")
@@ -80,13 +82,13 @@ class RulesTests(unittest.TestCase):
         self.apply(plan)
         self.assertEqual(set(self.snapshot()), {"AGENTS.md", "PROJECT_RULES.md"})
         self.assertEqual({p.name for p in self.root.iterdir()}, {"AGENTS.md", "PROJECT_RULES.md"})
-        self.assertIn("癌症", (self.root / "AGENTS.md").read_text(encoding="utf-8"))
+        self.assertIn("示例项目", (self.root / "AGENTS.md").read_text(encoding="utf-8"))
         self.assertNotIn("{{", (self.root / "AGENTS.md").read_text(encoding="utf-8"))
 
     def test_plan_without_bytecode_flag_does_not_create_bundle_cache(self):
         environment = dict(os.environ)
         environment.pop("PYTHONDONTWRITEBYTECODE", None)
-        result = subprocess.run([sys.executable, "-X", "utf8", str(self.script), "plan", str(self.root), "--language", "chinese", "--layout-file", "-"], input=json.dumps(LAYOUT), capture_output=True, encoding="utf-8", env=environment)
+        result = subprocess.run([sys.executable, "-X", "utf8", str(self.script), "plan", str(self.root), "--language", "chinese", "--timezone", "UTC", "--layout-file", "-"], input=json.dumps(LAYOUT), capture_output=True, encoding="utf-8", env=environment)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(list(self.bundle.rglob("__pycache__")), [])
         self.assertEqual(list(self.root.iterdir()), [])
@@ -150,28 +152,126 @@ class RulesTests(unittest.TestCase):
         for item in LAYOUT["directories"]:
             self.assertIn(item["path"], text)
             self.assertIn(item["purpose"], text)
-        self.assertIn(LAYOUT["research"], text)
-        self.assertIn("当前未设置项目环境", text)
+        self.assertIn(LAYOUT["scope"], text)
+        self.assertIn("本次未约定独立环境目录", text)
         self.assertNotIn("env/", text)
         self.assertNotIn("data/raw", text)
         self.assertEqual({p.name for p in self.root.iterdir()}, {"AGENTS.md", "PROJECT_RULES.md"})
 
+    def test_legacy_research_input_normalizes_to_scope_and_applies(self):
+        layout = dict(LAYOUT)
+        layout["research"] = layout.pop("scope")
+        plan = self.call("plan", self.root, "--language", "english", layout=layout)
+        self.assertEqual(plan["layout"], LAYOUT)
+        self.apply(plan)
+        text = (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8")
+        self.assertIn("当前工作范围：" + LAYOUT["scope"], text)
+        self.assertNotIn("当前研究范围", text)
+
+    def test_layout_with_both_scope_keys_is_rejected_without_writing(self):
+        result = self.call("plan", self.root, "--language", "english", layout=dict(LAYOUT, research="Legacy work"), success=False)
+        self.assertEqual(result["code"], "invalid_layout")
+        self.assertEqual(self.snapshot(), {})
+
+    def test_saved_legacy_plan_is_not_silently_migrated_on_apply(self):
+        plan = self.plan()
+        plan["layout"]["research"] = plan["layout"].pop("scope")
+        payload = {key: value for key, value in plan.items() if key != "plan_digest"}
+        plan["plan_digest"] = hashlib.sha256(json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        result = self.apply(plan, success=False)
+        self.assertEqual(result["code"], "plan_changed")
+        self.assertEqual(self.snapshot(), {})
+
+    def test_timezone_must_be_explicit_before_planning(self):
+        result = subprocess.run([sys.executable, "-B", "-X", "utf8", str(self.script), "plan", str(self.root), "--language", "english", "--layout-file", "-"], input=json.dumps(LAYOUT), capture_output=True, encoding="utf-8")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--timezone", result.stderr)
+        self.assertEqual(self.snapshot(), {})
+
+    def test_explicit_timezone_label_is_preserved_as_metadata(self):
+        plan = self.plan("--timezone", "Local/Configured-Zone")
+        self.assertEqual(plan["config"]["timezone"], "Local/Configured-Zone")
+        self.apply(plan)
+        self.assertIn("Local/Configured-Zone", (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8"))
+
     def test_chinese_layout_and_environment_are_rendered_with_safe_markdown(self):
-        layout = {"research": "胃癌 [初期] 文献梳理", "directories": [{"path": "胃癌/报告", "purpose": "PDF | PPT 汇报"}, {"path": "环境", "purpose": "研究环境预留"}], "environment": "环境", "outputs": ["胃癌/报告"], "originals": []}
+        layout = {"scope": "模块一 [初期] 文档整理", "directories": [{"path": "模块一/报告", "purpose": "PDF | PPT 汇报"}, {"path": "环境", "purpose": "项目环境预留"}], "environment": "环境", "outputs": ["模块一/报告"], "originals": []}
         plan = self.call("plan", self.root, "--language", "chinese", layout=layout)
         self.apply(plan)
         text = (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8")
-        self.assertIn("胃癌/报告", text)
+        self.assertIn("模块一/报告", text)
         self.assertIn("PDF \\| PPT", text)
-        self.assertIn("胃癌 \\[初期\\] 文献梳理", text)
+        self.assertIn("模块一 \\[初期\\] 文档整理", text)
         self.assertIn("目录预留不代表已安装", text)
         self.assertNotIn(str(self.root), text)
+
+    def test_unspecified_environment_does_not_deny_existing_native_environment(self):
+        native = self.root / ".venv"
+        native.mkdir()
+        config = native / "pyvenv.cfg"
+        config.write_bytes(b"existing native environment")
+        plan = self.plan()
+        self.apply(plan)
+        text = (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8")
+        self.assertIn("本次未约定独立环境目录", text)
+        self.assertNotIn("当前未设置项目环境", text)
+        self.assertIn("已有环境和工具原生环境沿用原位置", text)
+        self.assertEqual(config.read_bytes(), b"existing native environment")
+
+    def test_selected_environment_does_not_relocate_native_environments(self):
+        layout = dict(LAYOUT, directories=LAYOUT["directories"] + [{"path": "env", "purpose": "Shared environment records"}], environment="env")
+        plan = self.call("plan", self.root, "--language", "english", layout=layout)
+        self.apply(plan)
+        text = (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8")
+        self.assertIn("本次约定的独立环境目录为“env”", text)
+        self.assertIn("已有环境和工具原生环境沿用原位置", text)
+        self.assertNotIn("环境统一归主项目", text)
+        self.assertFalse((self.root / "env").exists())
+
+    def test_directory_language_does_not_impose_language_on_existing_filenames(self):
+        for name in TEMPLATES:
+            shutil.copyfile(SOURCE / "assets/templates" / name, self.bundle / "assets/templates" / name)
+        for language in ("chinese", "english"):
+            plan = self.call("plan", self.root, "--language", language)
+            text = next(item["content"] for item in plan["files"] if item["path"] == "PROJECT_RULES.md")
+            self.assertIn("文件名沿用已有项目、工具和原件约定", text)
+            self.assertNotIn("文档用简短英文名", text)
+            self.assertNotIn("业务目录和文档", text)
 
     def test_no_outputs_omits_archiving_section(self):
         layout = dict(LAYOUT, outputs=[])
         plan = self.call("plan", self.root, "--language", "english", layout=layout)
         self.apply(plan)
         self.assertNotIn("## 成果归档", (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8"))
+
+    def test_software_project_does_not_invent_archives_or_environment(self):
+        layout = {"scope": "Website maintenance", "directories": [{"path": "src", "purpose": "Application source"}, {"path": "public", "purpose": "Stable referenced assets"}, {"path": "dist", "purpose": "Tool-generated build output"}], "environment": None, "outputs": [], "originals": []}
+        plan = self.call("plan", self.root, "--language", "english", layout=layout)
+        self.apply(plan)
+        text = (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8")
+        self.assertIn("Website maintenance", text)
+        for row in layout["directories"]:
+            self.assertIn("| " + row["path"] + " | " + row["purpose"] + " |", text)
+        self.assertNotIn("## 成果归档", text)
+        self.assertNotIn("YYYYMMDD", text)
+        self.assertIn("本次未约定独立环境目录", text)
+        self.assertEqual({p.name for p in self.root.iterdir()}, {"AGENTS.md", "PROJECT_RULES.md"})
+
+    def test_archive_rules_apply_only_to_selected_deliveries_and_preserve_tool_contracts(self):
+        layout = {"scope": "Website documentation", "directories": [{"path": "dist", "purpose": "Tool-generated build output"}, {"path": "public", "purpose": "Stable referenced assets"}, {"path": "reports", "purpose": "Independent review exports"}], "environment": None, "outputs": ["reports"], "originals": []}
+        plan = self.call("plan", self.root, "--language", "english", layout=layout)
+        self.apply(plan)
+        text = (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8")
+        archive = text.split("## 成果归档", 1)[1]
+        self.assertIn("独立归档的报告或导出交付件", archive)
+        self.assertIn("成果位置：“reports”", archive)
+        self.assertNotIn("“dist”", archive)
+        self.assertNotIn("“public”", archive)
+        self.assertIn("工具固定文件名、产物结构和被引用的稳定资源沿用原约定", archive)
+        self.assertIn("已有归档结构沿用", archive)
+        self.assertIn("沿用已有命名与版本约定", archive)
+        self.assertIn("新建且无约定时采用", archive)
+        self.assertIn("同次 PPT/PDF 使用相同主名和版本", archive)
 
     def test_invalid_layouts_are_rejected_without_writing(self):
         invalid = []
@@ -182,7 +282,7 @@ class RulesTests(unittest.TestCase):
             dict(LAYOUT, environment="unselected-env"),
             dict(LAYOUT, outputs=["unselected-reports"]),
             dict(LAYOUT, originals=["../outside"]),
-            dict(LAYOUT, research="scope\nnew instruction"),
+            dict(LAYOUT, scope="scope\nnew instruction"),
             dict(LAYOUT, directories=[{"path": "safe", "purpose": "text\nnew instruction"}], outputs=[], originals=[]),
             dict(LAYOUT, directories="not-a-list"),
             dict(LAYOUT, environment=True),
@@ -208,15 +308,28 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(list(self.root.iterdir()), [])
 
     def test_originals_can_be_selected_directory_descendants(self):
-        layout = dict(LAYOUT, directories=[{"path": "gastric-cancer/data", "purpose": "Selected data"}], outputs=[], originals=["gastric-cancer/data/raw"])
+        layout = dict(LAYOUT, directories=[{"path": "module-a/data", "purpose": "Selected data"}], outputs=[], originals=["module-a/data/raw"])
         plan = self.call("plan", self.root, "--language", "english", layout=layout)
         self.apply(plan)
-        self.assertIn("gastric-cancer/data/raw", (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8"))
-        self.assertFalse((self.root / "gastric-cancer").exists())
+        self.assertIn("module-a/data/raw", (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8"))
+        self.assertFalse((self.root / "module-a").exists())
+
+    def test_root_level_original_file_does_not_require_a_made_up_directory(self):
+        original = self.root / "contract.pdf"
+        original.write_bytes(b"original document bytes")
+        layout = dict(LAYOUT, directories=[], outputs=[], originals=["contract.pdf"])
+        plan = self.call("plan", self.root, "--language", "english", layout=layout)
+        self.apply(plan)
+        self.assertEqual(original.read_bytes(), b"original document bytes")
+        text = (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8")
+        self.assertIn("原件位置：“contract.pdf”", text)
+        self.assertIn("明确保留的输入原件", text)
+        self.assertIn("日常维护文件按任务与版本控制约定编辑", text)
+        self.assertEqual({p.name for p in self.root.iterdir()}, {"AGENTS.md", "PROJECT_RULES.md", "contract.pdf"})
 
     def test_original_and_output_locations_must_not_overlap(self):
         for original, output in (("data", "data"), ("data", "data/results"), ("data/raw", "data")):
-            layout = {"research": "Selected research", "directories": [{"path": "data", "purpose": "Data"}, {"path": "data/results", "purpose": "Results"}], "environment": None, "outputs": [output], "originals": [original]}
+            layout = {"scope": "Selected work", "directories": [{"path": "data", "purpose": "Data"}, {"path": "data/results", "purpose": "Results"}], "environment": None, "outputs": [output], "originals": [original]}
             with self.subTest(original=original, output=output):
                 result = self.call("plan", self.root, "--language", "english", layout=layout, success=False)
                 self.assertEqual(result["code"], "invalid_layout")
@@ -252,13 +365,13 @@ class RulesTests(unittest.TestCase):
         self.assertFalse((self.root / "PROJECT_RULES.md").exists())
 
     def test_existing_selected_path_file_is_not_a_directory(self):
-        (self.root / "breast-cancer").write_bytes(b"a file")
+        (self.root / "module-a").write_bytes(b"a file")
         result = self.call("plan", self.root, "--language", "chinese", success=False)
         self.assertEqual(result["code"], "invalid_layout")
-        self.assertEqual((self.root / "breast-cancer").read_bytes(), b"a file")
+        self.assertEqual((self.root / "module-a").read_bytes(), b"a file")
 
     def test_duplicate_layout_json_keys_are_rejected(self):
-        source = '{"research":"first","research":"second","directories":[],"environment":null,"outputs":[],"originals":[]}'
+        source = '{"scope":"first","scope":"second","directories":[],"environment":null,"outputs":[],"originals":[]}'
         result = self.call("plan", self.root, "--language", "chinese", "--layout-file", "-", payload=source, success=False)
         self.assertEqual(result["code"], "invalid_layout")
         self.assertEqual(self.snapshot(), {})
@@ -382,7 +495,7 @@ class RulesTests(unittest.TestCase):
             self.assertEqual({item["action"] for item in repeated["files"]}, {"keep"})
 
     def test_english_configuration_renders_without_goal_or_mode(self):
-        plan = self.call("plan", self.root, "--language", "english", "--name", "Cancer", "--timezone", "UTC")
+        plan = self.call("plan", self.root, "--language", "english", "--name", "Example Project", "--timezone", "UTC")
         self.assertEqual(set(plan["config"]), {"name", "language", "timezone"})
         self.apply(plan)
         self.assertIn("UTC / English", (self.root / "AGENTS.md").read_text(encoding="utf-8"))

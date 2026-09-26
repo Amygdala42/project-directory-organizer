@@ -27,7 +27,8 @@ from path_safety import RootGuard, OperationError, fail, identity, is_reparse
 TOOL = "codex-project-setup.safe-delete"
 TRASH = ".project-trash"
 LOCK = ".project-delete.lock"
-PLAN_KEYS = {"schema_version", "tool", "created_utc", "root", "root_identity", "allow_library", "max_entries", "targets"}
+PLAN_KEYS_V1 = {"schema_version", "tool", "created_utc", "root", "root_identity", "allow_library", "max_entries", "targets"}
+PLAN_KEYS = (PLAN_KEYS_V1 - {"allow_library"}) | {"originals", "allow_originals"}
 ENTRY_KEYS = {"path", "kind", "identity", "size", "mtime_ns", "sha256"}
 MANIFEST_KEYS = {"schema_version", "tool", "batch", "created_utc", "updated_utc", "status", "plan", "progress", "error"}
 STATUSES = {"applying", "quarantined", "restoring", "restored", "purging", "purged", "apply_failed", "restore_failed", "purge_failed"}
@@ -55,18 +56,25 @@ def literal_path(value, empty=False):
     for part in parts:
         if part in {"", ".", ".."} or part.endswith((".", " ")) or part.split(".")[0].casefold() in RESERVED:
             fail("unsafe_path", "Empty, parent, reserved, or ambiguous path components are not accepted.")
-        if any(ord(c) < 32 or c in ':*?<>|"[]' for c in part):
+        if any(ord(c) < 32 or c in ':*?<>|"' for c in part):
             fail("unsafe_path", "Wildcards, control characters, streams, and ambiguous filenames are not accepted.")
     return "/".join(parts)
 
 
-def selected_path(value, allow_library):
+def selected_path(value, allow_originals, originals=None):
     value = literal_path(value)
     parts = {part.casefold() for part in value.split("/")}
     if parts.intersection({TRASH.casefold(), LOCK.casefold()}):
         fail("protected_path", "The deletion journal, lock, and quarantine cannot be selected for ordinary deletion.")
-    if "library" in parts and not allow_library:
-        fail("protected_library", "Original materials require an explicit --allow-library plan for these exact paths.")
+    if not allow_originals:
+        if originals is None and "library" in parts:
+            fail("protected_library", "This legacy plan requires explicit original-material authorization.")
+        if originals is not None:
+            key = value.casefold()
+            for original in originals:
+                protected = original.casefold()
+                if key == protected or key.startswith(protected + "/") or protected.startswith(key + "/"):
+                    fail("protected_originals", "Selected targets overlap declared original materials; include --allow-originals only when explicitly authorized for these exact targets.")
     return value
 
 
@@ -95,13 +103,19 @@ def long_existing_path(path):
         capacity = length + 1
 
 
-def validate_root_scope(guard, allow_library):
+def validate_root_scope(guard, allow_originals, originals=None):
     guard.check()
     parts = {part.casefold() for part in long_existing_path(guard.path).parts}
     if TRASH.casefold() in parts:
         fail("protected_path", "A quarantine or its descendant cannot be rebased as the deletion root.")
-    if "library" in parts and not allow_library:
-        fail("protected_library", "A root inside a library requires explicit --allow-library authorization in its plan.")
+    if originals is None and "library" in parts and not allow_originals:
+        fail("protected_library", "A root inside a legacy library requires explicit original-material authorization in its plan.")
+
+
+def validate_mutation_scope(guard, plan):
+    """Preserve old journal-location restrictions without inferring new roles."""
+    if plan["schema_version"] == 1 and any(part.casefold() == "library" for part in long_existing_path(guard.path).parts):
+        fail("library_root", "A legacy deletion journal cannot be written inside its protected library root; retain the old journal and use its original project root.")
 
 
 def safe_path(guard, value, missing=False):
@@ -127,9 +141,9 @@ def safe_path(guard, value, missing=False):
     return path, info
 
 
-def canonical_selected_path(guard, value, allow_library, missing=False):
+def canonical_selected_path(guard, value, allow_originals, missing=False, originals=None):
     """Check literal scope and physical components before expanding aliases."""
-    value = selected_path(value, allow_library)
+    value = selected_path(value, allow_originals, originals)
     path, info = safe_path(guard, value, missing=missing)
     # A restore destination may not exist; its existing parent still must not
     # hide a protected directory behind an 8.3 name.
@@ -138,7 +152,35 @@ def canonical_selected_path(guard, value, allow_library, missing=False):
         relative = expanded.relative_to(long_existing_path(guard.path)).as_posix()
     except ValueError:
         fail("unsafe_path", "The expanded path is outside the selected root.")
-    return selected_path(relative, allow_library)
+    return selected_path(relative, allow_originals, originals)
+
+
+def validate_originals(values):
+    if not isinstance(values, list) or len(values) > 100000:
+        fail("invalid_plan", "originals must list at most 100000 exact project-relative paths.")
+    for value in values:
+        if selected_path(value, True, []) != value:
+            fail("invalid_plan", "Original-material paths must use canonical forward-slash separators.")
+    return values
+
+
+def canonical_originals(guard, values):
+    """Normalize known originals before a new plan; recovery uses stored paths."""
+    if not isinstance(values, list) or len(values) > 100000:
+        fail("invalid_plan", "originals must list at most 100000 exact project-relative paths.")
+    normalized = [selected_path(value, True, []) for value in values]
+    validate_originals(normalized)
+    result, seen = [], set()
+    for value in normalized:
+        value = canonical_selected_path(guard, value, True, originals=[])
+        if value.casefold() not in seen:
+            result.append(value)
+            seen.add(value.casefold())
+    return result
+
+
+def plan_policy(plan):
+    return (plan["allow_library"], None) if plan["schema_version"] == 1 else (plan["allow_originals"], plan["originals"])
 
 
 def metadata(info):
@@ -166,9 +208,9 @@ def fingerprint(guard, full, relative):
     return {"path": relative, "kind": kind, "identity": list(identity(info)), "size": info.st_size, "mtime_ns": info.st_mtime_ns, "sha256": digest}
 
 
-def snapshot(guard, value, budget, allow_library=False, internal=False):
+def snapshot(guard, value, budget, allow_originals=False, internal=False, originals=None):
     if not internal:
-        value = canonical_selected_path(guard, value, allow_library)
+        value = canonical_selected_path(guard, value, allow_originals, originals=originals)
     result = []
     stack = [(value, "", False, None)]
     while stack:
@@ -178,7 +220,7 @@ def snapshot(guard, value, budget, allow_library=False, internal=False):
                 fail("changed", "A directory changed during traversal: " + full)
             continue
         if relative and not internal:
-            selected_path(relative, allow_library)
+            selected_path(full, allow_originals, originals)
         budget[0] -= 1
         if budget[0] < 0:
             fail("entry_limit", "Traversal exceeds --max-entries; no executable truncated plan was produced.")
@@ -209,13 +251,19 @@ def valid_identity(value):
 
 
 def validate_plan(guard, plan):
-    if not isinstance(plan, dict) or set(plan) != PLAN_KEYS or type(plan["schema_version"]) is not int or plan["schema_version"] != 1 or plan["tool"] != TOOL:
+    if not isinstance(plan, dict) or type(plan.get("schema_version")) is not int or plan["schema_version"] not in (1, 2):
+        fail("invalid_plan", "Unsupported deletion-plan schema.")
+    expected_keys = PLAN_KEYS_V1 if plan["schema_version"] == 1 else PLAN_KEYS
+    if set(plan) != expected_keys or plan["tool"] != TOOL:
         fail("invalid_plan", "Unsupported deletion-plan schema.")
     if not isinstance(plan["root"], str) or os.path.normcase(plan["root"]) != os.path.normcase(str(guard.path)) or not valid_identity(plan["root_identity"]) or tuple(plan["root_identity"]) != guard.original:
         fail("wrong_root", "The plan belongs to a different root path or filesystem directory.")
-    if not isinstance(plan["created_utc"], str) or type(plan["allow_library"]) is not bool or type(plan["max_entries"]) is not int or not 1 <= plan["max_entries"] <= 100000:
+    allow_originals, originals = plan_policy(plan)
+    if not isinstance(plan["created_utc"], str) or type(allow_originals) is not bool or type(plan["max_entries"]) is not int or not 1 <= plan["max_entries"] <= 100000:
         fail("invalid_plan", "Invalid plan settings.")
-    validate_root_scope(guard, plan["allow_library"])
+    if plan["schema_version"] == 2:
+        validate_originals(originals)
+    validate_root_scope(guard, allow_originals, originals)
     if not isinstance(plan["targets"], list) or not plan["targets"]:
         fail("invalid_plan", "A plan must contain at least one exact target.")
     count = 0
@@ -223,7 +271,7 @@ def validate_plan(guard, plan):
     for target in plan["targets"]:
         if not isinstance(target, dict) or set(target) != {"path", "entries"}:
             fail("invalid_plan", "Invalid target record.")
-        value = selected_path(target["path"], plan["allow_library"])
+        value = selected_path(target["path"], allow_originals, originals)
         if value != target["path"]:
             fail("invalid_plan", "Plan paths must use canonical forward-slash separators.")
         paths.append(value)
@@ -237,7 +285,7 @@ def validate_plan(guard, plan):
                 fail("invalid_plan", "Invalid or excessive tree entries.")
             relative = literal_path(entry["path"], empty=True)
             if relative:
-                selected_path(relative, plan["allow_library"])
+                selected_path(value + "/" + relative, allow_originals, originals)
             if relative != entry["path"] or entry["kind"] not in {"file", "directory"} or not valid_identity(entry["identity"]):
                 fail("invalid_plan", "Invalid tree path, kind, or identity.")
             if type(entry["size"]) is not int or entry["size"] < 0 or type(entry["mtime_ns"]) is not int:
@@ -254,30 +302,34 @@ def validate_plan(guard, plan):
     return plan
 
 
-def make_plan(guard, paths, allow_library=False, maximum=10000):
+def make_plan(guard, paths, allow_originals=False, maximum=10000, originals=()):
     if not 1 <= maximum <= 100000:
         fail("entry_limit", "--max-entries must be between 1 and 100000.")
-    validate_root_scope(guard, allow_library)
-    paths = [canonical_selected_path(guard, value, allow_library) for value in paths]
+    originals = canonical_originals(guard, list(originals))
+    validate_root_scope(guard, allow_originals, originals)
+    paths = [canonical_selected_path(guard, value, allow_originals, originals=originals) for value in paths]
     unique_targets(paths)
     budget = [maximum]
-    targets = [{"path": value, "entries": snapshot(guard, value, budget, allow_library)} for value in paths]
-    plan = {"schema_version": 1, "tool": TOOL, "created_utc": now(), "root": str(guard.path), "root_identity": list(guard.original), "allow_library": allow_library, "max_entries": maximum, "targets": targets}
+    targets = [{"path": value, "entries": snapshot(guard, value, budget, allow_originals, originals=originals)} for value in paths]
+    plan = {"schema_version": 2, "tool": TOOL, "created_utc": now(), "root": str(guard.path), "root_identity": list(guard.original), "originals": originals, "allow_originals": allow_originals, "max_entries": maximum, "targets": targets}
     return validate_plan(guard, plan)
 
 
 def verify_targets(guard, plan, quarantine=None):
+    allow_originals, originals = plan_policy(plan)
     if quarantine is None:
         # Also validate saved/edited plans: string-only overlap checks cannot
         # detect a long name and an 8.3 alias of that same entry or its parent.
-        expanded = [canonical_selected_path(guard, target["path"], plan["allow_library"]) for target in plan["targets"]]
+        if originals is not None and canonical_originals(guard, originals) != originals:
+            fail("invalid_plan", "Original-material paths contain aliases or changed path names; create a fresh plan.")
+        expanded = [canonical_selected_path(guard, target["path"], allow_originals, originals=originals) for target in plan["targets"]]
         unique_targets(expanded)
         if any(actual.casefold() != target["path"].casefold() for actual, target in zip(expanded, plan["targets"])):
             fail("invalid_plan", "The plan contains Windows short-name aliases; create a fresh plan using the expanded names.")
     budget = [plan["max_entries"]]
     for index, target in enumerate(plan["targets"]):
         source = target["path"] if quarantine is None else quarantine + "/items/" + format(index, "04d")
-        if snapshot(guard, source, budget, plan["allow_library"], internal=quarantine is not None) != target["entries"]:
+        if snapshot(guard, source, budget, allow_originals, internal=quarantine is not None, originals=originals) != target["entries"]:
             fail("changed", "A selected tree changed since its recorded plan: " + source)
 
 
@@ -407,6 +459,8 @@ def record_failure(guard, manifest_path, manifest, previous, phase, error):
 
 def apply_plan(guard, plan):
     validate_plan(guard, plan)
+    validate_mutation_scope(guard, plan)
+    allow_originals, originals = plan_policy(plan)
     verify_targets(guard, plan)
     check_trash(guard)
     with locked(guard):
@@ -425,7 +479,7 @@ def apply_plan(guard, plan):
         write_new(guard, manifest_path, raw)
         try:
             for index, target in enumerate(plan["targets"]):
-                if snapshot(guard, target["path"], [plan["max_entries"]], plan["allow_library"]) != target["entries"]:
+                if snapshot(guard, target["path"], [plan["max_entries"]], allow_originals, originals=originals) != target["entries"]:
                     fail("changed", "A target changed before its move: " + target["path"])
                 manifest["progress"][index] = "moving"
                 raw = save_manifest(guard, manifest_path, manifest, raw)
@@ -455,6 +509,7 @@ def load_batch(guard, batch):
     if not isinstance(manifest["status"], str) or manifest["status"] not in STATUSES or not isinstance(manifest["created_utc"], str) or not isinstance(manifest["updated_utc"], str):
         fail("invalid_batch", "Invalid journal status or timestamps.")
     validate_plan(guard, manifest["plan"])
+    validate_mutation_scope(guard, manifest["plan"])
     progress = manifest["progress"]
     if not isinstance(progress, list) or len(progress) != len(manifest["plan"]["targets"]) or any(not isinstance(value, str) or value not in PROGRESS for value in progress):
         fail("invalid_batch", "Invalid per-target progress journal.")
@@ -468,9 +523,10 @@ def load_batch(guard, batch):
 
 
 def preflight_restore(guard, manifest):
+    allow_originals, originals = plan_policy(manifest["plan"])
     expanded = []
     for target in manifest["plan"]["targets"]:
-        expanded.append(canonical_selected_path(guard, target["path"], manifest["plan"]["allow_library"], missing=True))
+        expanded.append(canonical_selected_path(guard, target["path"], allow_originals, missing=True, originals=originals))
         _, info = safe_path(guard, target["path"], missing=True)
         if info is not None:
             fail("collision", "The original location is occupied; no files were overwritten: " + target["path"])
@@ -561,7 +617,8 @@ def main(argv=None):
         command.add_argument("root", help="Existing project root; never a symlink or junction")
         if name == "plan":
             command.add_argument("--path", action="append", required=True, help="Exact relative file/directory; repeat for multiple targets")
-            command.add_argument("--allow-library", action="store_true")
+            command.add_argument("--original-path", action="append", default=[], help="Known protected original file/directory, relative to the confirmed project root; repeat for each reviewed location")
+            command.add_argument("--allow-originals", action="store_true", help="Use only for explicit authorization to delete the exact selected original-material targets")
             command.add_argument("--max-entries", type=int, default=10000)
         elif name == "apply":
             command.add_argument("--plan-file", required=True)
@@ -574,10 +631,8 @@ def main(argv=None):
         if args.command != "plan" and sys.platform != "win32":
             fail("unsupported_platform", "Only Windows supports mutation commands in this version; other platforms may use read-only plan.")
         guard = RootGuard(args.root)
-        if args.command != "plan" and any(part.casefold() == "library" for part in long_existing_path(guard.path).parts):
-            fail("library_root", "Deletion journals must remain outside library. Choose the enclosing project root and explicitly authorize its library/... target; the tool will not change roots for you.")
         if args.command == "plan":
-            result = make_plan(guard, args.path, args.allow_library, args.max_entries)
+            result = make_plan(guard, args.path, args.allow_originals, args.max_entries, args.original_path)
         elif args.command == "apply":
             plan, _ = read_json(Path(args.plan_file))
             result = apply_plan(guard, plan)

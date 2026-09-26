@@ -60,8 +60,10 @@ class SafeDeleteTests(unittest.TestCase):
         args = []
         for path in paths:
             args.extend(["--path", path])
-        if options.pop("allow_library", False):
-            args.append("--allow-library")
+        if options.pop("allow_originals", False):
+            args.append("--allow-originals")
+        for path in options.pop("originals", []):
+            args.extend(["--original-path", path])
         maximum = options.pop("max_entries", None)
         if maximum is not None:
             args.extend(["--max-entries", maximum])
@@ -186,38 +188,127 @@ class SafeDeleteTests(unittest.TestCase):
         self.call("restore", "--batch", result["batch"])
         self.assertEqual((self.root / "one.txt").read_text(), "retained")
 
-    def test_library_original_requires_explicit_flag_in_plan(self):
-        original = self.write("library/topic/original.txt", "unchanged")
-        self.plan("library/topic/original.txt", success=False)
-        self.assertEqual(original.read_text(), "unchanged")
-        plan = self.plan("library/topic/original.txt", allow_library=True)
-        self.assertTrue(plan["allow_library"])
+    def test_custom_original_requires_explicit_flag_and_roundtrips(self):
+        original = self.write("客户原件/contract.pdf", "unchanged")
+        rejected = self.plan("客户原件/contract.pdf", originals=["客户原件"], success=False)
+        self.assertEqual(rejected["code"], "protected_originals")
+        self.assertEqual(original.read_text(encoding="utf-8"), "unchanged")
+        plan = self.plan("客户原件/contract.pdf", originals=["客户原件"], allow_originals=True)
+        self.assertEqual(plan["schema_version"], 2)
+        self.assertEqual(plan["originals"], ["客户原件"])
+        self.assertTrue(plan["allow_originals"])
         result = self.apply(plan)
         self.call("restore", "--batch", result["batch"])
-        self.assertEqual(original.read_text(), "unchanged")
+        self.assertEqual(original.read_text(encoding="utf-8"), "unchanged")
 
-    def test_library_root_and_ancestor_require_explicit_flag(self):
-        self.write("library/topic/original.txt", "original")
-        for root, selected in ((self.root / "library", "topic/original.txt"), (self.root / "library/topic", "original.txt")):
-            with self.subTest(root=root):
-                self.call("plan", "--path", selected, root=root, success=False)
-                allowed = self.call("plan", "--path", selected, "--allow-library", root=root)
-                self.assertTrue(allowed["allow_library"])
+    def test_original_ancestor_descendant_and_exact_target_are_protected(self):
+        self.write("project/inputs/contract.pdf", "original")
+        for selected, original in (("project", "project/inputs"), ("project/inputs", "project/inputs"), ("project/inputs/contract.pdf", "project/inputs"), ("project/inputs", "project/inputs/contract.pdf")):
+            with self.subTest(selected=selected, original=original):
+                rejected = self.plan(selected, originals=[original], success=False)
+                self.assertEqual(rejected["code"], "protected_originals")
+        allowed = self.plan("project", originals=["project/inputs"], allow_originals=True)
+        result = self.apply(allowed)
+        self.call("restore", "--batch", result["batch"])
+        self.assertEqual((self.root / "project/inputs/contract.pdf").read_text(), "original")
 
-    def test_parent_of_nested_library_requires_explicit_flag(self):
-        self.write("project/library/raw.txt", "raw")
-        self.plan("project", success=False)
-        allowed = self.plan("project", allow_library=True)
-        self.assertTrue(allowed["allow_library"])
+    def test_directory_names_do_not_infer_original_roles(self):
+        self.write("library/generated.txt", "generated")
+        self.write("reference/retained.txt", "retained original")
+        result = self.apply(self.plan("library/generated.txt", originals=["reference"]))
+        self.assertEqual((self.root / "reference/retained.txt").read_text(), "retained original")
+        self.call("restore", "--batch", result["batch"])
+        self.assertEqual((self.root / "library/generated.txt").read_text(), "generated")
 
-    def test_library_root_cannot_receive_mutation_journals(self):
+    def test_original_roles_use_full_paths_not_matching_descendant_names(self):
+        self.write("sources/original.txt", "retained original")
+        self.write("bundle/sources/generated.txt", "generated item")
+        plan = self.plan("bundle", originals=["sources"])
+        result = self.apply(plan)
+        self.assertEqual((self.root / "sources/original.txt").read_text(), "retained original")
+        self.call("restore", "--batch", result["batch"])
+        self.assertEqual((self.root / "bundle/sources/generated.txt").read_text(), "generated item")
+
+    def test_original_paths_accept_literal_backslash_input_and_record_canonical_form(self):
+        self.write("client/inputs/contract.pdf", "original")
+        self.write("draft.txt", "draft")
+        plan = self.plan("draft.txt", originals=["client\\inputs"])
+        self.assertEqual(plan["originals"], ["client/inputs"])
+
+    def test_original_role_metadata_may_contain_folder_and_child(self):
+        self.write("client/input.pdf", "original")
+        self.write("draft.txt", "draft")
+        paths = ["client", "client/input.pdf", "client"]
+        plan = self.plan("draft.txt", originals=paths)
+        self.assertEqual(plan["originals"], ["client", "client/input.pdf"])
+        result = self.apply(plan)
+        self.call("restore", "--batch", result["batch"])
+        explicit = self.plan("client", originals=paths, allow_originals=True)
+        result = self.apply(explicit)
+        self.call("restore", "--batch", result["batch"])
+        self.assertEqual((self.root / "client/input.pdf").read_text(), "original")
+
+    def test_unrelated_code_and_library_ancestors_do_not_define_roles(self):
+        for parent in ("code", "library"):
+            root = self.case / parent / "client-project"
+            root.mkdir(parents=True)
+            selected = root / "draft.txt"
+            selected.write_text("independent draft", encoding="utf-8")
+            plan = self.call("plan", "--path", selected.name, root=root)
+            result = self.apply(plan, root=root)
+            self.call("restore", "--batch", result["batch"], root=root)
+            self.assertEqual(selected.read_text(), "independent draft")
+
+    def test_original_role_cannot_use_root_traversal_or_quarantine(self):
+        self.write("draft.txt")
+        for original in (".", "..", "../outside", ".project-trash", ".project-delete.lock"):
+            with self.subTest(original=original):
+                self.plan("draft.txt", originals=[original], success=False)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["draft.txt"])
+
+    def legacy_plan(self, plan, allow_library=False):
+        plan = dict(plan, schema_version=1, allow_library=allow_library)
+        plan.pop("originals")
+        plan.pop("allow_originals")
+        return plan
+
+    def test_legacy_plan_retains_library_guard_and_existing_manifest_restores(self):
+        original = self.write("library/input.txt", "legacy original")
+        generic = self.plan("library/input.txt")
+        self.apply(self.legacy_plan(generic), success=False)
+        allowed = self.legacy_plan(generic, allow_library=True)
+        result = self.apply(allowed)
+        manifest = self.batch(result) / "manifest.json"
+        self.assertEqual(json.loads(manifest.read_text())["plan"], allowed)
+        self.call("restore", "--batch", result["batch"])
+        self.assertEqual(original.read_text(), "legacy original")
+
+    def test_legacy_root_inside_library_cannot_receive_mutation_journals(self):
         self.write("library/original.txt", "original")
         library = self.root / "library"
-        plan = self.call("plan", "--path", "original.txt", "--allow-library", root=library)
-        record = self.case / "library-plan.json"
-        record.write_text(json.dumps(plan), encoding="utf-8")
-        self.call("apply", "--plan-file", record, root=library, success=False)
+        generic = self.call("plan", "--path", "original.txt", root=library)
+        legacy = self.legacy_plan(generic, allow_library=True)
+        self.apply(legacy, root=library, success=False)
         self.assertEqual(sorted(p.name for p in library.iterdir()), ["original.txt"])
+
+    def test_v2_original_roles_are_validated_before_any_write(self):
+        item = self.write("draft.txt", "retained")
+        plan = self.plan("draft.txt")
+        for changes in ({"originals": ["draft.txt"]}, {"originals": None}, {"originals": "draft.txt"}, {"originals": ["../outside"]}, {"allow_originals": "yes"}):
+            self.apply(dict(plan, **changes), success=False)
+        self.assertEqual(item.read_text(), "retained")
+        self.assertFalse((self.root / ".project-trash").exists())
+
+    def test_legacy_original_batch_can_be_purged_without_rewriting_its_plan(self):
+        self.write("library/input.txt", "legacy original")
+        self.write("keep.txt", "retained")
+        legacy = self.legacy_plan(self.plan("library/input.txt"), allow_library=True)
+        result = self.apply(legacy)
+        self.call("purge", "--batch", result["batch"], "--permanent")
+        manifest = json.loads((self.batch(result) / "manifest.json").read_text())
+        self.assertEqual(manifest["plan"], legacy)
+        self.assertEqual(manifest["status"], "purged")
+        self.assertEqual((self.root / "keep.txt").read_text(), "retained")
 
     def test_quarantine_root_and_ancestor_cannot_be_rebased(self):
         self.write(".project-trash/batch/keep.txt", "keep")
@@ -299,6 +390,19 @@ class SafeDeleteTests(unittest.TestCase):
         self.write("draft/a.txt")
         self.plan("draft", "draft/a.txt", success=False)
         self.plan("draft", "draft", success=False)
+
+    def test_brackets_in_filename_are_literal_and_roundtrip_without_matching_neighbors(self):
+        selected = "report [approved].txt"
+        neighbor = "report a.txt"
+        original = self.write(selected, "exact selected content")
+        self.write(neighbor, "keep neighbor")
+        plan = self.plan(selected)
+        self.assertEqual([item["path"] for item in plan["targets"]], [selected])
+        result = self.apply(plan)
+        self.assertFalse(original.exists())
+        self.assertEqual((self.root / neighbor).read_text(), "keep neighbor")
+        self.call("restore", "--batch", result["batch"])
+        self.assertEqual(original.read_text(), "exact selected content")
 
     def short_name(self, path):
         """Get a real NTFS short alias; do not invent a name if 8.3 is disabled."""
@@ -438,7 +542,7 @@ class SafeDeleteTests(unittest.TestCase):
     def test_schema_and_path_tampering_are_rejected(self):
         item = self.write("one.txt")
         original = self.plan("one.txt")
-        for key, value in (("schema_version", 900), ("allow_library", "yes")):
+        for key, value in (("schema_version", 900), ("allow_originals", "yes")):
             with self.subTest(key=key):
                 changed = dict(original, **{key: value})
                 self.apply(changed, success=False)

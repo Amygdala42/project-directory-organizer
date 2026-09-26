@@ -18,7 +18,7 @@ import sys
 
 sys.dont_write_bytecode = True
 from path_safety import RootGuard, OperationError, fail, identity
-from safe_delete import (fingerprint, literal_path, long_existing_path, move_exact,
+from safe_delete import (TRASH, fingerprint, literal_path, long_existing_path, move_exact,
                          now, read_json, safe_path, unique_json, unique_targets)
 
 TOOL = 'codex-project-directory.safe-move'
@@ -56,6 +56,17 @@ def protect(value):
         name = component.casefold()
         if name.startswith('.') or name in PROTECTED_PARTS or Path(name).suffix in CODE_SUFFIXES:
             fail('protected_path', 'Originals, code, environments, rules and hidden/tool files cannot be moved by this command: ' + str(value))
+
+
+def protect_project_root(guard):
+    """Check the confirmed root itself, not unrelated hosting directory names."""
+    guard.check()
+    expanded = long_existing_path(guard.path)
+    if any(part.casefold() == TRASH.casefold() for part in expanded.parts):
+        fail('protected_path', 'A quarantine or its descendant cannot be used as a movement root.')
+    # Keep root rebasing and 8.3-name protections. Relative object paths still
+    # pass through protect(); only ancestors outside the project are exempt.
+    protect(expanded.name)
 
 
 def canonical(guard, value, missing=False):
@@ -154,7 +165,7 @@ def make_plan(guard, mapping, relative_log, maximum=10000):
         if record['decision'] == 'hold':
             record.update(source=held_path(guard, item['source']), destination=held_path(guard, item['destination']))
         if record['decision'] == 'move':
-            protect(str(long_existing_path(guard.path)))
+            protect_project_root(guard)
             source, _ = canonical(guard, item['source'])
             destination, existing = canonical(guard, item['destination'], missing=True)
             protect(source)
@@ -214,7 +225,7 @@ def validate(guard, plan):
         if item['decision'] != expected or not isinstance(item['entries'], list):
             fail('invalid_plan', 'A risk or unknown group cannot be promoted to move.')
         if expected == 'move':
-            protect(str(long_existing_path(guard.path)))
+            protect_project_root(guard)
             protect(item['source'])
             protect(item['destination'])
             if not item['entries']:

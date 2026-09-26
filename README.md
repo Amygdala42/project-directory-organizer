@@ -2,7 +2,7 @@
 
 版本：**v1.0.0**
 
-为 Codex 提供项目目录规划、文件风险检查与整理、成果归档、只读盘点及精确删除恢复功能。支持中文或英文业务目录。
+为 Codex 提供项目目录规划、文件风险检查与整理、成果归档、只读盘点及精确删除恢复功能。支持中文或英文业务目录，结构按当前项目和任务选择，不预设行业、学科或完整目录套件。
 
 ## 工作方式
 
@@ -35,10 +35,10 @@ Copy-Item -LiteralPath '.\skills\project-directory-organizer' -Destination $dest
 在该项目中调用：
 
 ```text
-$project-directory-organizer 主目录是 D:\Projects\Cancer，首先研究胃癌，请先给出目录计划。
+$project-directory-organizer 主目录是 D:\Projects\my-project，用于说明文档编写，请先给出新建目录的计划。
 ```
 
-新建项目会生成 `AGENTS.md` 和 `PROJECT_RULES.md`：前者是读取入口，后者保存实际采用的目录、环境归属、命名、成果批次和文件保护规则。环境目录只预留时，不代表已安装软件。报告与分析成果按日期和用途分批，同次 PPT 和对应 PDF 共址、同版本。
+新建项目会生成 `AGENTS.md` 和 `PROJECT_RULES.md`：前者是读取入口，后者保存实际采用的目录、环境归属、命名、成果批次和文件保护规则。环境目录只预留时，不代表已安装软件。选定的报告和导出归档位置沿用已有约定，尚无约定时推荐按日期和用途分批，同次 PPT 和对应 PDF 共址、同版本；工具生成目录和关联源码素材保留原生结构。
 
 [完整使用说明](docs/usage.md) · [技能入口](skills/project-directory-organizer/SKILL.md) · [目录示例](skills/project-directory-organizer/references/examples.md)
 
@@ -79,4 +79,4 @@ $project-directory-organizer 主目录是 D:\Projects\Cancer，首先研究胃�
 python -B -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-测试夹具写入系统临时目录下的 `project-directory-organizer-tests/`，不写入仓库或实际研究目录。夹具为复核失败保留，不会自动清除；请勿将这些运行产物上传到仓库。
+测试夹具写入系统临时目录下的 `project-directory-organizer-tests/`，不写入仓库或实际项目目录。夹具为复核失败保留，不会自动清除；请勿将这些运行产物上传到仓库。

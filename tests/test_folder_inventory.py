@@ -97,15 +97,15 @@ class InventoryTests(unittest.TestCase):
 
     def test_recursive_hidden_non_ascii_and_binary_metadata(self):
         self.file(".hidden", b"ab")
-        self.file("研究/第二层/输入.bin", b"\x00\xff\xfe")
+        self.file("资料/第二层/输入.bin", b"\x00\xff\xfe")
         self.file("unknown/not-a-standard-category/note.md", b"four")
         report = self.call()
         entries = self.items(report)
         self.assertTrue(report["complete"])
-        self.assertEqual(set(entries), {".hidden", "研究", "研究/第二层", "研究/第二层/输入.bin",
+        self.assertEqual(set(entries), {".hidden", "资料", "资料/第二层", "资料/第二层/输入.bin",
                                         "unknown", "unknown/not-a-standard-category", "unknown/not-a-standard-category/note.md"})
-        self.assertEqual(entries["研究/第二层/输入.bin"]["depth"], 3)
-        self.assertEqual(entries["研究/第二层/输入.bin"]["size_bytes"], 3)
+        self.assertEqual(entries["资料/第二层/输入.bin"]["depth"], 3)
+        self.assertEqual(entries["资料/第二层/输入.bin"]["size_bytes"], 3)
         self.assertRegex(entries[".hidden"]["modified_utc"], r"^\d{4}-\d\d-\d\dT.*Z$")
         self.assertEqual(report["summary"]["files"], 3)
         self.assertEqual(report["summary"]["directories"], 4)

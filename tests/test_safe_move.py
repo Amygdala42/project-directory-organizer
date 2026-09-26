@@ -92,6 +92,23 @@ class SafeMoveTests(unittest.TestCase):
         self.assertEqual((self.root / 'draft.txt').read_text(), 'draft')
         self.assertFalse((self.root / 'reports/draft.txt').exists())
 
+    @unittest.skipUnless(os.name == 'nt', 'Mutations require Windows no-overwrite rename.')
+    def test_bracket_filename_moves_literally_and_rolls_back(self):
+        source = 'review [ab].pdf'
+        self.write(source, 'selected report')
+        for name in ('review a.pdf', 'review b.pdf'):
+            self.write(name, 'unselected report')
+        item = self.item(source, 'reports/' + source)
+        item['evidence']['checked_paths'] = [source]
+        self.assertEqual(self.apply(self.plan(item))['status'], 'applied')
+        self.assertFalse((self.root / source).exists())
+        self.assertEqual((self.root / 'reports' / source).read_text(), 'selected report')
+        self.assertEqual(self.rollback()['status'], 'rolled_back')
+        self.assertEqual((self.root / source).read_text(), 'selected report')
+        self.assertFalse((self.root / 'reports' / source).exists())
+        for name in ('review a.pdf', 'review b.pdf'):
+            self.assertEqual((self.root / name).read_text(), 'unselected report')
+
     def test_risk_and_unknown_are_not_executable(self):
         self.write('other.txt', 'unknown')
         result = self.plan(self.item(risk='risk'), self.item('other.txt', 'reports/other.txt', risk='unknown', group='other'))
@@ -119,6 +136,47 @@ class SafeMoveTests(unittest.TestCase):
     def test_hidden_protected_descendant_in_directory_package(self):
         self.write('package/.git/config', 'repository')
         self.assertEqual(self.plan(self.item('package', 'reports/package'), success=False)['error']['code'], 'protected_path')
+
+    def use_project_root(self, relative):
+        self.root = self.case / relative
+        (self.root / 'reports').mkdir(parents=True)
+        (self.root / 'records').mkdir()
+        self.write('draft.txt', 'draft')
+
+    def test_project_host_names_do_not_classify_independent_project_files(self):
+        for host in ('code', 'library', '.codex/worktrees'):
+            with self.subTest(host=host):
+                self.use_project_root(host + '/client-project')
+                plan = self.plan()
+                self.assertEqual(plan['items'][0]['decision'], 'move')
+                self.assertTrue((self.root / 'draft.txt').exists())
+                self.assertFalse((self.root / 'records/move.jsonl').exists())
+
+    @unittest.skipUnless(os.name == 'nt', 'Mutations require Windows no-overwrite rename.')
+    def test_move_and_rollback_under_unrelated_host_names(self):
+        for host in ('code', 'library', '.codex/worktrees'):
+            with self.subTest(host=host):
+                self.use_project_root(host + '/client-project')
+                self.assertEqual(self.apply(self.plan())['status'], 'applied')
+                self.assertFalse((self.root / 'draft.txt').exists())
+                self.assertEqual((self.root / 'reports/draft.txt').read_text(), 'draft')
+                self.assertEqual(self.rollback()['status'], 'rolled_back')
+                self.assertEqual((self.root / 'draft.txt').read_text(), 'draft')
+                self.assertFalse((self.root / 'reports/draft.txt').exists())
+
+    def test_protected_project_root_names_cannot_be_rebased(self):
+        for name in ('code', 'library', 'src', 'env', 'reference', 'raw', '.private'):
+            with self.subTest(name=name):
+                self.use_project_root('projects/' + name)
+                self.assertEqual(self.plan(success=False)['error']['code'], 'protected_path')
+                self.assertTrue((self.root / 'draft.txt').exists())
+                self.assertFalse((self.root / 'records/move.jsonl').exists())
+
+    def test_quarantine_ancestor_cannot_be_a_project_host(self):
+        self.use_project_root('.project-trash/batch/files/client-project')
+        self.assertEqual(self.plan(success=False)['error']['code'], 'protected_path')
+        self.assertTrue((self.root / 'draft.txt').exists())
+        self.assertFalse((self.root / 'records/move.jsonl').exists())
 
     def test_rejects_overlap_and_missing_parent(self):
         self.write('package/file.txt', 'package')

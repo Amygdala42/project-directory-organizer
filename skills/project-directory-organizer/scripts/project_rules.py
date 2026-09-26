@@ -52,7 +52,7 @@ def validate_config(config):
     if config["language"] not in {"chinese", "english"}:
         fail("invalid_config", "language must be chinese or english.")
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_+.-]*(?:/[A-Za-z0-9_+.-]+)*", config["timezone"]):
-        fail("invalid_config", "Use a timezone label such as Asia/Shanghai or UTC.")
+        fail("invalid_config", "Use an explicit timezone label such as UTC or a Region/City label.")
     return config
 
 
@@ -97,9 +97,11 @@ def path_key(value):
 
 
 def validate_layout(layout, guard):
-    if not isinstance(layout, dict) or set(layout) != {"research", "directories", "environment", "outputs", "originals"}:
-        fail("invalid_layout", "Layout must contain research, directories, environment, outputs, and originals.")
-    research = layout_text(layout["research"], "research")
+    fields = {"directories", "environment", "outputs", "originals"}
+    if not isinstance(layout, dict) or set(layout) not in (fields | {"scope"}, fields | {"research"}):
+        fail("invalid_layout", "Layout must contain scope, directories, environment, outputs, and originals. The legacy research key may replace scope, but cannot appear alongside it.")
+    scope_field = "scope" if "scope" in layout else "research"
+    scope = layout_text(layout[scope_field], scope_field)
     rows = layout["directories"]
     if not isinstance(rows, list) or len(rows) > 500:
         fail("invalid_layout", "directories must be a list of at most 500 selected directory rows.")
@@ -131,8 +133,6 @@ def validate_layout(layout, guard):
             seen.add(key)
             if field == "outputs" and key not in selected:
                 fail("invalid_layout", "Each output location must be explicitly listed among selected directories.")
-            if field == "originals" and not any(key == item or key.startswith(item + "/") for item in selected):
-                fail("invalid_layout", "Each original-material path must belong to a selected directory.")
             paths.append(path)
         lists[field] = paths
     for original in lists["originals"]:
@@ -140,7 +140,7 @@ def validate_layout(layout, guard):
             a, b = path_key(original), path_key(output)
             if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
                 fail("invalid_layout", "Original-material and output locations must not overlap or contain one another.")
-    return {"research": research, "directories": directories, "environment": environment, **lists}
+    return {"scope": scope, "directories": directories, "environment": environment, **lists}
 
 
 def markdown_text(value):
@@ -155,7 +155,7 @@ def quoted_path(value):
 def layout_fields(layout, language):
     rows = layout["directories"]
     table = "| 相对目录 | 用途 |\n| --- | --- |\n" + "\n".join("| " + markdown_text(row["path"]) + " | " + markdown_text(row["purpose"]) + " |" for row in rows) if rows else "本次未选业务子目录。"
-    environment = "当前未设置项目环境，新增按实际任务确定。" if layout["environment"] is None else "环境统一归主项目" + quoted_path(layout["environment"]) + "；目录预留不代表已安装，实际配置按用户任务进行。"
+    environment = "本次未约定独立环境目录；已有环境和工具原生环境沿用原位置。" if layout["environment"] is None else "本次约定的独立环境目录为" + quoted_path(layout["environment"]) + "；目录预留不代表已安装，已有环境和工具原生环境沿用原位置，实际配置按任务与工具要求确定。"
     outputs = ""
     if layout["outputs"]:
         locations = "、".join(quoted_path(path) for path in layout["outputs"])
@@ -164,15 +164,16 @@ def layout_fields(layout, language):
         outputs = "\n".join((
             "## 成果归档", "",
             "- 成果位置：" + locations + "。",
-            "- 在对应位置下用 `" + batch + "` 建批次，日期取实际产出或修订日；实际产出或明确预留时才建，不强制成对建立结果与报告批次。",
+            "- 以下批次与版本规则适用于这些位置中独立归档的报告或导出交付件；工具固定文件名、产物结构和被引用的稳定资源沿用原约定。",
+            "- 已有归档结构沿用；新建且无约定时，在对应位置下用 `" + batch + "` 建交付批次，日期取实际产出或修订日；实际产出或明确预留时才建，不强制成对建立结果与报告批次。",
             "- 同日同次工作复用批次，不同用途分开。",
-            "- 普通成果采用 `" + filename + "`，修订递增且跨日连续，不覆盖旧版本；同次 PPT/PDF 使用相同主名和版本，配套材料共址。",
+            "- 独立交付文件沿用已有命名与版本约定；新建且无约定时采用 `" + filename + "`，修订递增且跨日连续，不覆盖旧版本；同次 PPT/PDF 使用相同主名和版本，配套材料共址。",
             "- 跨日仅为新增或修订成果建立当日批次，不复制未变化材料；稳定维护的代码、数据和参考资料不随日期移动。",
         ))
-    originals = "原件内容、名称、位置和包结构保持原样。"
+    originals = "明确保留的输入原件保持内容、名称、位置和包结构；日常维护文件按任务与版本控制约定编辑。"
     if layout["originals"]:
         originals = "原件位置：" + "、".join(quoted_path(path) for path in layout["originals"]) + "。" + originals
-    return {"PROJECT_SCOPE": "本文件所在目录为主项目根目录，下列路径均相对此目录。当前研究范围：" + markdown_text(layout["research"]) + "。", "DIRECTORY_TABLE": table, "ENVIRONMENT_RULE": environment, "OUTPUT_RULES": outputs, "ORIGINAL_RULES": originals}
+    return {"PROJECT_SCOPE": "本文件所在目录为主项目根目录，下列路径均相对此目录。当前工作范围：" + markdown_text(layout["scope"]) + "。", "DIRECTORY_TABLE": table, "ENVIRONMENT_RULE": environment, "OUTPUT_RULES": outputs, "ORIGINAL_RULES": originals}
 
 
 def templates(config, layout, include_rules):
@@ -180,7 +181,7 @@ def templates(config, layout, include_rules):
         "PROJECT_NAME": config["name"], "TIMEZONE": config["timezone"],
         "LANGUAGE": "中文" if config["language"] == "chinese" else "English",
         "RULES_FILE": "PROJECT_RULES.md",
-        "NAMING_RULE": "自建业务目录和文档用清楚、简短的中文名称。" if config["language"] == "chinese" else "自建业务目录用小写 ASCII 英文和连字符，文档用简短英文名。",
+        "NAMING_RULE": ("自建业务目录用清楚、简短的中文名称。" if config["language"] == "chinese" else "自建业务目录用小写 ASCII 英文和连字符。") + "文件名沿用已有项目、工具和原件约定；独立交付文件另见成果归档规则。",
     }
     if layout is not None:
         values.update(layout_fields(layout, config["language"]))
@@ -421,7 +422,7 @@ def main():
     planning.add_argument("root")
     planning.add_argument("--language", choices=("chinese", "english"), required=True)
     planning.add_argument("--name")
-    planning.add_argument("--timezone", default="Asia/Shanghai")
+    planning.add_argument("--timezone", required=True, help="Explicit timezone label from the project rules or known session context; stored as metadata, not resolved against a timezone database.")
     planning.add_argument("--layout-file", help="Selected layout JSON file, or - for stdin. Required when PROJECT_RULES.md does not exist.")
     applying = commands.add_parser("apply", help="Apply the exact plan on an explicit user operation request; do not ask again.")
     applying.add_argument("root")
