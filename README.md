@@ -12,27 +12,7 @@
 
 已有答案不重复问，未回答不代选；模拟不会自动变成实际操作。整理时只移动检查充分且通过的独立组，有风险或无法确认的内容保留原位并给出建议。
 
-## 项目内安装
-
-在本仓库根目录打开 PowerShell，将下面的项目地址替换成自己的实际项目路径：
-
-```powershell
-$projectPath = 'D:\Projects\my-project'
-if (-not (Test-Path -LiteralPath $projectPath -PathType Container)) {
-    throw '项目目录不存在，请先填写正确地址。'
-}
-$skillsPath = Join-Path $projectPath '.agents\skills'
-$destination = Join-Path $skillsPath 'project-directory-organizer'
-if (Test-Path -LiteralPath $destination) {
-    throw '该项目已安装此技能，请先核对已有版本，不直接覆盖。'
-}
-New-Item -ItemType Directory -Path $skillsPath -Force | Out-Null
-Copy-Item -LiteralPath '.\skills\project-directory-organizer' -Destination $destination -Recurse
-```
-
-复制整个技能目录，包括 scripts、references 和 assets。安装位置是项目下的 `.agents/skills/`。
-
-在该项目中调用：
+## 使用示例
 
 ```text
 $project-directory-organizer 主目录是 D:\Projects\my-project，用于说明文档编写，请先给出新建目录的计划。
