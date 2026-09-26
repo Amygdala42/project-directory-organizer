@@ -1,4 +1,4 @@
-# Project Directory Organizer v1.0.0
+# Project Directory Organizer
 
 ## 使用方式
 
