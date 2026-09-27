@@ -457,6 +457,19 @@ def record_failure(guard, manifest_path, manifest, previous, phase, error):
     raise raised from error
 
 
+def initialization_failure(guard, plan, error, batch=None):
+    raised = OperationError(getattr(error, "code", "filesystem_error"), str(error))
+    raised.phase = "initialize"
+    raised.progress = ["pending"] * len(plan["targets"])
+    raised.not_moved = [target["path"] for target in plan["targets"]]
+    raised.quarantine = str(guard.path / TRASH)
+    if batch is not None:
+        raised.batch = batch
+        raised.manifest = str(guard.path / TRASH / batch / "manifest.json")
+    raised.recovery = "No selected targets were moved. Inspect the reported quarantine and any partial records manually before retrying."
+    raise raised from error
+
+
 def apply_plan(guard, plan):
     validate_plan(guard, plan)
     validate_mutation_scope(guard, plan)
@@ -466,17 +479,23 @@ def apply_plan(guard, plan):
     with locked(guard):
         validate_plan(guard, plan)
         verify_targets(guard, plan)
-        check_trash(guard, create=True)
+        try:
+            check_trash(guard, create=True)
+        except (OSError, OperationError) as error:
+            initialization_failure(guard, plan, error)
         batch = uuid.uuid4().hex
         relative = TRASH + "/" + batch
-        path, _ = safe_path(guard, relative, missing=True)
-        path.mkdir()
-        items, _ = safe_path(guard, relative + "/items", missing=True)
-        items.mkdir()
-        manifest = {"schema_version": 1, "tool": TOOL, "batch": batch, "created_utc": now(), "updated_utc": now(), "status": "applying", "plan": plan, "progress": ["pending"] * len(plan["targets"]), "error": None}
         manifest_path = relative + "/manifest.json"
-        raw = json_bytes(manifest)
-        write_new(guard, manifest_path, raw)
+        try:
+            path, _ = safe_path(guard, relative, missing=True)
+            path.mkdir()
+            items, _ = safe_path(guard, relative + "/items", missing=True)
+            items.mkdir()
+            manifest = {"schema_version": 1, "tool": TOOL, "batch": batch, "created_utc": now(), "updated_utc": now(), "status": "applying", "plan": plan, "progress": ["pending"] * len(plan["targets"]), "error": None}
+            raw = json_bytes(manifest)
+            write_new(guard, manifest_path, raw)
+        except (OSError, OperationError) as error:
+            initialization_failure(guard, plan, error, batch)
         try:
             for index, target in enumerate(plan["targets"]):
                 if snapshot(guard, target["path"], [plan["max_entries"]], allow_originals, originals=originals) != target["entries"]:
@@ -643,8 +662,11 @@ def main(argv=None):
         code = 0
     except OperationError as error:
         result, code = {"status": "error", "code": error.code, "message": str(error)}, 1
-        if hasattr(error, "batch"):
-            result.update(batch=error.batch, progress=error.progress, phase=error.phase, recovery="Inspect the retained batch journal; automatic continuation is disabled for interrupted operations.")
+        if hasattr(error, "phase"):
+            result.update(progress=error.progress, phase=error.phase, recovery=getattr(error, "recovery", "Inspect the retained batch journal; automatic continuation is disabled for interrupted operations."))
+            for name in ("batch", "quarantine", "manifest", "not_moved"):
+                if hasattr(error, name):
+                    result[name] = getattr(error, name)
     except (OSError, UnicodeError, ValueError, TypeError) as error:
         result, code = {"status": "error", "code": "filesystem_or_record_error", "message": str(error)}, 1
     print(json.dumps(result, ensure_ascii=True))

@@ -386,10 +386,25 @@ def apply(guard, plan, confirmation, relative_log):
     check_journal_capacity(plan, moves)
     if os.name != 'nt':
         fail('unsupported_platform', 'Mutations require Windows no-overwrite rename semantics.')
-    with journal_lock(path, create=True) as handle:
-        preflight(guard, plan)
-        previous = append(handle, {'event': 'start', 'tool': TOOL, 'plan': plan}, b'')
-        result = mutate(guard, plan, moves, handle, previous)
+    created_log_identity = None
+    preflight_completed = False
+    try:
+        with journal_lock(path, create=True) as handle:
+            created_log_identity = identity(os.fstat(handle.fileno()))
+            preflight(guard, plan)
+            preflight_completed = True
+            previous = append(handle, {'event': 'start', 'tool': TOOL, 'plan': plan}, b'')
+            result = mutate(guard, plan, moves, handle, previous)
+    except Exception:
+        if created_log_identity is not None and not preflight_completed:
+            try:
+                checked_path, info = journal_path(guard, relative_log, plan)
+                if (checked_path == path and stat.S_ISREG(info.st_mode)
+                        and identity(info) == created_log_identity and info.st_size == 0):
+                    checked_path.unlink()
+            except Exception:
+                pass  # Retain uncertain logs without hiding the preflight error.
+        raise
     return dict(result, log=relative_log, plan_digest=plan['plan_digest'])
 
 

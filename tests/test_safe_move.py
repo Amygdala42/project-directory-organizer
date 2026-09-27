@@ -239,6 +239,131 @@ class SafeMoveTests(unittest.TestCase):
         self.assertEqual(self.apply(plan, success=False)['error']['code'], 'changed')
         self.assertFalse((self.root / 'records/move.jsonl').exists())
 
+    @unittest.skipUnless(os.name == 'nt', 'Journal creation uses Windows locks.')
+    def test_changed_source_during_locked_preflight_removes_empty_new_log(self):
+        from unittest.mock import patch
+
+        module = load_move_module()
+        plan = self.plan()
+        original_preflight = module.preflight
+        calls = 0
+
+        def change_after_first_preflight(*args, **kwargs):
+            nonlocal calls
+            result = original_preflight(*args, **kwargs)
+            calls += 1
+            if calls == 1:
+                self.write('draft.txt', 'changed between preflights')
+            return result
+
+        with patch.object(module, 'preflight', change_after_first_preflight):
+            with self.assertRaises(module.OperationError) as raised:
+                module.apply(module.RootGuard(self.root), plan, plan['plan_digest'], 'records/move.jsonl')
+        self.assertEqual(raised.exception.code, 'changed')
+        self.assertEqual(calls, 1)
+        self.assertFalse((self.root / 'records/move.jsonl').exists())
+        self.assertEqual((self.root / 'draft.txt').read_text(), 'changed between preflights')
+        self.assertFalse((self.root / 'reports/draft.txt').exists())
+
+    @unittest.skipUnless(os.name == 'nt', 'Journal creation uses Windows locks.')
+    def test_cleanup_failure_does_not_mask_locked_preflight_error(self):
+        from unittest.mock import patch
+
+        module = load_move_module()
+        plan = self.plan()
+        original_preflight = module.preflight
+        calls = 0
+
+        def change_after_first_preflight(*args, **kwargs):
+            nonlocal calls
+            result = original_preflight(*args, **kwargs)
+            calls += 1
+            if calls == 1:
+                self.write('draft.txt', 'changed between preflights')
+            return result
+
+        with patch.object(module, 'preflight', change_after_first_preflight):
+            with patch.object(module.Path, 'unlink', side_effect=RuntimeError('fixture cleanup failure')):
+                with self.assertRaises(module.OperationError) as raised:
+                    module.apply(module.RootGuard(self.root), plan, plan['plan_digest'], 'records/move.jsonl')
+        self.assertEqual(raised.exception.code, 'changed')
+        self.assertTrue((self.root / 'records/move.jsonl').exists())
+        self.assertEqual((self.root / 'records/move.jsonl').stat().st_size, 0)
+
+    @unittest.skipUnless(os.name == 'nt', 'Journal creation uses Windows locks.')
+    def test_nonempty_log_is_retained_after_locked_preflight_error(self):
+        from contextlib import contextmanager
+        from unittest.mock import patch
+
+        module = load_move_module()
+        plan = self.plan()
+        original_preflight = module.preflight
+        original_lock = module.journal_lock
+        calls = 0
+
+        def change_after_first_preflight(*args, **kwargs):
+            nonlocal calls
+            result = original_preflight(*args, **kwargs)
+            calls += 1
+            if calls == 1:
+                self.write('draft.txt', 'changed between preflights')
+            return result
+
+        @contextmanager
+        def nonempty_log(path, create=False):
+            with original_lock(path, create=create) as handle:
+                handle.write(b'foreign journal bytes')
+                handle.flush()
+                yield handle
+
+        with patch.object(module, 'preflight', change_after_first_preflight):
+            with patch.object(module, 'journal_lock', nonempty_log):
+                with self.assertRaises(module.OperationError) as raised:
+                    module.apply(module.RootGuard(self.root), plan, plan['plan_digest'], 'records/move.jsonl')
+        self.assertEqual(raised.exception.code, 'changed')
+        self.assertEqual((self.root / 'records/move.jsonl').read_bytes(), b'foreign journal bytes')
+
+    @unittest.skipUnless(os.name == 'nt', 'Journal creation uses Windows locks.')
+    def test_replaced_empty_log_is_retained_after_locked_preflight_error(self):
+        from contextlib import contextmanager
+        from unittest.mock import patch
+
+        module = load_move_module()
+        plan = self.plan()
+        original_preflight = module.preflight
+        original_lock = module.journal_lock
+        calls = 0
+        replacement_identity = None
+
+        def change_after_first_preflight(*args, **kwargs):
+            nonlocal calls
+            result = original_preflight(*args, **kwargs)
+            calls += 1
+            if calls == 1:
+                self.write('draft.txt', 'changed between preflights')
+            return result
+
+        @contextmanager
+        def replace_after_close(path, create=False):
+            nonlocal replacement_identity
+            replacement = path.with_name('replacement.jsonl')
+            replacement.write_bytes(b'')
+            replacement_identity = module.identity(replacement.lstat())
+            try:
+                with original_lock(path, create=create) as handle:
+                    yield handle
+            finally:
+                path.unlink()
+                replacement.rename(path)
+
+        with patch.object(module, 'preflight', change_after_first_preflight):
+            with patch.object(module, 'journal_lock', replace_after_close):
+                with self.assertRaises(module.OperationError) as raised:
+                    module.apply(module.RootGuard(self.root), plan, plan['plan_digest'], 'records/move.jsonl')
+        self.assertEqual(raised.exception.code, 'changed')
+        self.assertEqual(module.identity((self.root / 'records/move.jsonl').lstat()), replacement_identity)
+        self.assertEqual((self.root / 'records/move.jsonl').stat().st_size, 0)
+
     def test_changed_assessment_input_is_rejected(self):
         self.write('usage.txt', 'reviewed reference evidence')
         item = self.item()

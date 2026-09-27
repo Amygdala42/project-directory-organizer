@@ -74,6 +74,30 @@ class SafeDeleteTests(unittest.TestCase):
         path.write_text(json.dumps(plan, ensure_ascii=True), encoding="utf-8")
         return self.call("apply", "--plan-file", path, success=success, root=root)
 
+    def apply_with_write_failure(self, plan, record):
+        path = self.case / ("plan-" + uuid.uuid4().hex + ".json")
+        path.write_text(json.dumps(plan, ensure_ascii=True), encoding="utf-8")
+        self.assertTrue(self.root.absolute().is_relative_to(self.case.absolute()))
+        code = """import sys
+from pathlib import Path
+script, root, plan, record = sys.argv[1:]
+sys.path.insert(0, str(Path(script).parent))
+import safe_delete
+write_new = safe_delete.write_new
+def fail_record(guard, value, data):
+    if value == record or (record == '.project-trash/manifest.json' and value.startswith('.project-trash/') and value.endswith('/manifest.json')):
+        raise OSError('injected record write failure')
+    return write_new(guard, value, data)
+safe_delete.write_new = fail_record
+sys.exit(safe_delete.main(['apply', root, '--plan-file', plan]))
+"""
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", code, str(SCRIPT), str(self.root), str(path), record],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
     def batch(self, payload):
         return self.root / ".project-trash" / payload["batch"]
 
@@ -652,6 +676,39 @@ class SafeDeleteTests(unittest.TestCase):
         self.apply(self.plan("one.txt"), success=False)
         self.assertEqual((self.root / ".project-trash/keep.txt").read_text(), "existing")
         self.assertTrue((self.root / "one.txt").exists())
+
+    def test_owner_initialization_failure_reports_retained_location_and_no_moves(self):
+        selected = self.write("one.txt", "retained")
+        second = self.write("two.txt", "retained too")
+        result = self.apply_with_write_failure(self.plan("one.txt", "two.txt"), ".project-trash/owner.json")
+        self.assertEqual(result.get("phase"), "initialize")
+        self.assertEqual(result["progress"], ["pending", "pending"])
+        self.assertEqual(result["not_moved"], ["one.txt", "two.txt"])
+        self.assertEqual(result["quarantine"], str(self.root / ".project-trash"))
+        self.assertNotIn("batch", result)
+        self.assertNotIn("manifest", result)
+        self.assertIn("No selected targets were moved", result["recovery"])
+        self.assertEqual(selected.read_text(), "retained")
+        self.assertEqual(second.read_text(), "retained too")
+        self.assertTrue((self.root / ".project-trash").is_dir())
+        self.assertFalse((self.root / ".project-trash/owner.json").exists())
+
+    def test_manifest_initialization_failure_reports_orphan_batch_and_no_moves(self):
+        selected = self.write("one.txt", "retained")
+        second = self.write("two.txt", "retained too")
+        result = self.apply_with_write_failure(self.plan("one.txt", "two.txt"), ".project-trash/manifest.json")
+        self.assertEqual(result.get("phase"), "initialize")
+        self.assertEqual(result["progress"], ["pending", "pending"])
+        self.assertEqual(result["not_moved"], ["one.txt", "two.txt"])
+        self.assertEqual(len(result["batch"]), 32)
+        batch = self.root / ".project-trash" / result["batch"]
+        self.assertEqual(result["quarantine"], str(self.root / ".project-trash"))
+        self.assertEqual(result["manifest"], str(batch / "manifest.json"))
+        self.assertIn("No selected targets were moved", result["recovery"])
+        self.assertEqual(selected.read_text(), "retained")
+        self.assertEqual(second.read_text(), "retained too")
+        self.assertTrue((batch / "items").is_dir())
+        self.assertFalse((batch / "manifest.json").exists())
 
     def test_quarantine_junction_refused_before_move(self):
         self.write("one.txt")
