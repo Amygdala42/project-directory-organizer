@@ -293,6 +293,51 @@ class RulesTests(unittest.TestCase):
                 self.assertEqual(result["code"], "invalid_layout")
                 self.assertEqual(self.snapshot(), {})
 
+    def test_root_rule_names_cannot_be_layout_locations_or_their_ancestors(self):
+        for name in ("AGENTS.md", "agents.md", "AgEnTs.Md", "PROJECT_RULES.md", "project_rules.md", "PrOjEcT_RuLeS.Md"):
+            for suffix in ("", "/reports"):
+                path = name + suffix
+                for field in ("directories", "environment", "outputs", "originals"):
+                    layout = {"scope": "Selected work", "directories": [], "environment": None, "outputs": [], "originals": []}
+                    if field != "originals":
+                        layout["directories"] = [{"path": path, "purpose": "Selected location"}]
+                    if field == "environment":
+                        layout[field] = path
+                    elif field in ("outputs", "originals"):
+                        layout[field] = [path]
+                    with self.subTest(path=path, field=field):
+                        result = self.call("plan", self.root, "--language", "english", layout=layout, success=False)
+                        self.assertEqual(result["code"], "invalid_layout")
+                        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_rule_names_inside_subprojects_remain_valid_directories_and_original_files(self):
+        originals = self.root / "module-b"
+        originals.mkdir()
+        for name in ("AGENTS.md", "PROJECT_RULES.md"):
+            (originals / name).write_bytes(b"Preserved subproject rules")
+        layout = {
+            "scope": "Selected subprojects",
+            "directories": [
+                {"path": "module-a/AGENTS.md", "purpose": "Existing naming contract"},
+                {"path": "module-a/PROJECT_RULES.md/reports", "purpose": "Independent exports"},
+            ],
+            "environment": "module-a/AGENTS.md",
+            "outputs": ["module-a/PROJECT_RULES.md/reports"],
+            "originals": ["module-b/AGENTS.md", "module-b/PROJECT_RULES.md"],
+        }
+        plan = self.call("plan", self.root, "--language", "english", layout=layout)
+        self.assertTrue(plan["ready_to_apply"])
+        self.assertEqual(plan["layout"], layout)
+        self.apply(plan)
+        for name in ("AGENTS.md", "PROJECT_RULES.md"):
+            self.assertEqual((originals / name).read_bytes(), b"Preserved subproject rules")
+            self.assertTrue((self.root / name).is_file())
+        for path in ("module-a/AGENTS.md", "module-a/PROJECT_RULES.md/reports"):
+            selected = self.root / path
+            self.assertFalse(selected.exists())
+            selected.mkdir(parents=True)
+            self.assertTrue(selected.is_dir())
+
     def test_layout_is_bound_to_the_displayed_plan(self):
         plan = self.plan()
         plan["layout"]["directories"][0]["purpose"] = "Unreviewed purpose"
@@ -339,7 +384,7 @@ class RulesTests(unittest.TestCase):
         for language, batch, filename in (("english", "YYYYMMDD-purpose", "content-name_v01.ext"), ("chinese", "YYYYMMDD用途", "内容名_v01.ext")):
             plan = self.call("plan", self.root, "--language", language)
             text = next(item["content"] for item in plan["files"] if item["path"] == "PROJECT_RULES.md")
-            for phrase in (batch, filename, "实际产出或明确预留", "不强制成对", "同日同次", "不同用途", "跨日连续", "不覆盖旧版本", "PPT/PDF", "不复制未变化", "不随日期移动"):
+            for phrase in (batch, filename, "实际产出或明确预留", "不强制成对", "同日同一逻辑交付批次", "不同用途", "跨日连续", "不覆盖旧版本", "PPT/PDF", "不复制未变化", "不随日期移动"):
                 self.assertIn(phrase, text)
 
     def test_custom_rules_encoding_and_unrelated_template_changes_do_not_trigger_merge(self):

@@ -30,14 +30,24 @@ class SafeDeleteTests(unittest.TestCase):
         self.root = self.case / "root"
         self.root.mkdir()
 
-    def call(self, command, *args, success=True, root=None):
+    def call(self, command, *args, success=True, root=None, record_limit=None):
         root = self.root if root is None else Path(root)
         # Resolve only normal fixture roots here. Link fixtures are themselves
         # inside the test area and may point only at another fixture directory.
         self.assertTrue(root.absolute().is_relative_to(self.case.absolute()))
         self.assertTrue(root.resolve().is_relative_to(self.case.resolve()))
+        invocation = [sys.executable, "-B", str(SCRIPT)]
+        if record_limit is not None:
+            code = """import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]).parent))
+import safe_delete
+safe_delete.MAX_RECORD_BYTES = int(sys.argv[2])
+sys.exit(safe_delete.main(sys.argv[3:]))
+"""
+            invocation = [sys.executable, "-B", "-c", code, str(SCRIPT), str(record_limit)]
         result = subprocess.run(
-            [sys.executable, "-B", str(SCRIPT), command, str(root), *map(str, args)],
+            [*invocation, command, str(root), *map(str, args)],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         if success:
@@ -69,10 +79,21 @@ class SafeDeleteTests(unittest.TestCase):
             args.extend(["--max-entries", maximum])
         return self.call("plan", *args, **options)
 
-    def apply(self, plan, success=True, root=None):
+    def apply(self, plan, success=True, root=None, record_limit=None):
         path = self.case / ("plan-" + uuid.uuid4().hex + ".json")
         path.write_text(json.dumps(plan, ensure_ascii=True), encoding="utf-8")
-        return self.call("apply", "--plan-file", path, success=success, root=root)
+        return self.call("apply", "--plan-file", path, success=success, root=root, record_limit=record_limit)
+
+    def manifest_size(self, plan, status, progress):
+        # Independent journal fixture: production UUIDs/timestamps have these
+        # fixed lengths. Keep the real JSON encoder and filesystem operations.
+        manifest = {
+            "schema_version": 1, "tool": "codex-project-setup.safe-delete",
+            "batch": "0" * 32, "created_utc": "2026-09-29T00:00:00+00:00",
+            "updated_utc": "2026-09-29T00:00:00+00:00", "status": status,
+            "plan": plan, "progress": progress, "error": None,
+        }
+        return len((json.dumps(manifest, ensure_ascii=True, indent=2) + "\n").encode("utf-8"))
 
     def apply_with_write_failure(self, plan, record):
         path = self.case / ("plan-" + uuid.uuid4().hex + ".json")
@@ -125,6 +146,99 @@ sys.exit(safe_delete.main(['apply', root, '--plan-file', plan]))
         self.assertEqual((self.root / "draft/sub/two.txt").read_text(), "two")
         manifest = json.loads((self.batch(result) / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["status"], "restored")
+
+    def test_apply_rejects_readable_plan_with_oversized_manifest_before_creating_trash(self):
+        item = self.write("one.txt", "retained")
+        plan = self.plan("one.txt")
+        limit = len(json.dumps(plan, ensure_ascii=True).encode("utf-8"))
+        self.assertGreater(self.manifest_size(plan, "applying", ["pending"]), limit)
+
+        rejected = self.apply(plan, success=False, record_limit=limit)
+
+        self.assertEqual(rejected["code"], "invalid_json")
+        self.assertEqual(item.read_text(), "retained")
+        self.assertFalse((self.root / ".project-trash").exists())
+        self.assertFalse((self.root / ".project-delete.lock").exists())
+
+    def test_apply_reserves_manifest_space_for_restore_progress_before_creating_trash(self):
+        names = ("one.txt", "two.txt", "three.txt")
+        for name in names:
+            self.write(name, name)
+        plan = self.plan(*names)
+        limit = self.manifest_size(plan, "applying", ["pending"] * 3)
+        self.assertLessEqual(self.manifest_size(plan, "quarantined", ["stored"] * 3), limit)
+        self.assertGreater(self.manifest_size(plan, "restoring", ["restored", "restored", "restoring"]), limit)
+
+        rejected = self.apply(plan, success=False, record_limit=limit)
+
+        self.assertEqual(rejected["code"], "invalid_json")
+        for name in names:
+            self.assertEqual((self.root / name).read_text(), name)
+        self.assertFalse((self.root / ".project-trash").exists())
+        self.assertFalse((self.root / ".project-delete.lock").exists())
+
+    def test_manifest_budget_allows_restore_and_purge_with_readable_journals(self):
+        names = ("one.txt", "two.txt", "three.txt")
+        for name in names:
+            self.write(name, name)
+        plan = self.plan(*names)
+        limit = self.manifest_size(plan, "quarantined", ["restoring"] * 3)
+
+        applied = self.apply(plan, record_limit=limit)
+        self.assertTrue(applied["recoverable"])
+        self.assertLessEqual((self.batch(applied) / "manifest.json").stat().st_size, limit)
+        restored = self.call("restore", "--batch", applied["batch"], record_limit=limit)
+        self.assertEqual(restored["status"], "restored")
+        self.assertLessEqual((self.batch(applied) / "manifest.json").stat().st_size, limit)
+        for name in names:
+            self.assertEqual((self.root / name).read_text(), name)
+
+        applied = self.apply(plan, record_limit=limit)
+        purged = self.call("purge", "--batch", applied["batch"], "--permanent", record_limit=limit)
+        self.assertEqual(purged["status"], "purged")
+        self.assertLessEqual((self.batch(applied) / "manifest.json").stat().st_size, limit)
+        self.assertEqual(list((self.batch(applied) / "items").iterdir()), [])
+
+    def test_restore_rejects_legacy_manifest_without_progress_budget_before_any_change(self):
+        item = self.write("one.txt", "retained")
+        plan = self.plan("one.txt")
+        applied = self.apply(plan)
+        record = self.batch(applied) / "manifest.json"
+        before = record.read_bytes()
+        limit = len(before)
+        self.assertLessEqual(self.manifest_size(plan, "restoring", ["stored"]), limit)
+        self.assertGreater(self.manifest_size(plan, "restoring", ["restoring"]), limit)
+
+        rejected = self.call("restore", "--batch", applied["batch"], success=False, record_limit=limit)
+
+        self.assertEqual(rejected["code"], "invalid_json")
+        self.assertEqual(record.read_bytes(), before)
+        self.assertEqual(json.loads(record.read_bytes())["status"], "quarantined")
+        self.assertEqual((self.batch(applied) / "items/0000").read_text(), "retained")
+        self.assertFalse(item.exists())
+        self.assertFalse((self.root / ".project-delete.lock").exists())
+
+    def test_purge_rejects_legacy_manifest_without_progress_budget_before_any_change(self):
+        item = self.write("one.txt", "retained")
+        plan = self.plan("one.txt")
+        applied = self.apply(plan)
+        record = self.batch(applied) / "manifest.json"
+        # Compact journals are valid input too; re-encoding them for a state
+        # update can consume the remaining budget before any item is purged.
+        before = json.dumps(json.loads(record.read_bytes()), ensure_ascii=True).encode("utf-8")
+        record.write_bytes(before)
+        limit = self.manifest_size(plan, "purging", ["stored"])
+        self.assertLessEqual(len(before), limit)
+        self.assertGreater(self.manifest_size(plan, "purging", ["purging"]), limit)
+
+        rejected = self.call("purge", "--batch", applied["batch"], "--permanent", success=False, record_limit=limit)
+
+        self.assertEqual(rejected["code"], "invalid_json")
+        self.assertEqual(record.read_bytes(), before)
+        self.assertEqual(json.loads(record.read_bytes())["status"], "quarantined")
+        self.assertEqual((self.batch(applied) / "items/0000").read_text(), "retained")
+        self.assertFalse(item.exists())
+        self.assertFalse((self.root / ".project-delete.lock").exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows case-insensitive root paths")
     def test_root_case_variant_apply_restores_using_plan_root(self):

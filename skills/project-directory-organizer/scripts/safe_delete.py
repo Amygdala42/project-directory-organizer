@@ -27,6 +27,7 @@ from path_safety import RootGuard, OperationError, fail, identity, is_reparse
 TOOL = "codex-project-setup.safe-delete"
 TRASH = ".project-trash"
 LOCK = ".project-delete.lock"
+MAX_RECORD_BYTES = 64 * 1024 * 1024
 PLAN_KEYS_V1 = {"schema_version", "tool", "created_utc", "root", "root_identity", "allow_library", "max_entries", "targets"}
 PLAN_KEYS = (PLAN_KEYS_V1 - {"allow_library"}) | {"originals", "allow_originals"}
 ENTRY_KEYS = {"path", "kind", "identity", "size", "mtime_ns", "sha256"}
@@ -42,7 +43,10 @@ def now():
 
 def json_bytes(value):
     # ASCII JSON preserves NTFS names containing unpaired UTF-16 surrogates.
-    return (json.dumps(value, ensure_ascii=True, indent=2) + "\n").encode("utf-8")
+    raw = (json.dumps(value, ensure_ascii=True, indent=2) + "\n").encode("utf-8")
+    if len(raw) > MAX_RECORD_BYTES:
+        fail("invalid_json", "The record exceeds the supported JSON byte limit.")
+    return raw
 
 
 def literal_path(value, empty=False):
@@ -344,7 +348,7 @@ def unique_json(pairs):
 
 def read_json(path):
     info = path.lstat()
-    if is_reparse(info) or not stat.S_ISREG(info.st_mode) or info.st_size > 64 * 1024 * 1024:
+    if is_reparse(info) or not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RECORD_BYTES:
         fail("invalid_json", "The record must be a regular file of at most 64 MiB.")
     raw = path.read_bytes()
     try:
@@ -403,6 +407,13 @@ def check_trash(guard, create=False):
                 != dict(owner, root=os.path.normcase(owner["root"]))):
             fail("invalid_trash", "The existing quarantine belongs to an unknown root or tool.")
     return True
+
+
+def preflight_manifest(manifest):
+    # Reserve the longest normal status and per-target progress labels before
+    # any persistent change. Also budget the next generated update timestamp:
+    # existing journals may use a shorter timestamp or compact JSON encoding.
+    json_bytes(dict(manifest, updated_utc=now(), status="quarantined", progress=["restoring"] * len(manifest["progress"])))
 
 
 def save_manifest(guard, relative, manifest, previous):
@@ -475,6 +486,10 @@ def apply_plan(guard, plan):
     validate_mutation_scope(guard, plan)
     allow_originals, originals = plan_policy(plan)
     verify_targets(guard, plan)
+    batch = uuid.uuid4().hex
+    manifest = {"schema_version": 1, "tool": TOOL, "batch": batch, "created_utc": now(), "updated_utc": now(), "status": "applying", "plan": plan, "progress": ["pending"] * len(plan["targets"]), "error": None}
+    preflight_manifest(manifest)
+    raw = json_bytes(manifest)
     check_trash(guard)
     with locked(guard):
         validate_plan(guard, plan)
@@ -483,7 +498,6 @@ def apply_plan(guard, plan):
             check_trash(guard, create=True)
         except (OSError, OperationError) as error:
             initialization_failure(guard, plan, error)
-        batch = uuid.uuid4().hex
         relative = TRASH + "/" + batch
         manifest_path = relative + "/manifest.json"
         try:
@@ -491,8 +505,6 @@ def apply_plan(guard, plan):
             path.mkdir()
             items, _ = safe_path(guard, relative + "/items", missing=True)
             items.mkdir()
-            manifest = {"schema_version": 1, "tool": TOOL, "batch": batch, "created_utc": now(), "updated_utc": now(), "status": "applying", "plan": plan, "progress": ["pending"] * len(plan["targets"]), "error": None}
-            raw = json_bytes(manifest)
             write_new(guard, manifest_path, raw)
         except (OSError, OperationError) as error:
             initialization_failure(guard, plan, error, batch)
@@ -534,6 +546,7 @@ def load_batch(guard, batch):
         fail("invalid_batch", "Invalid per-target progress journal.")
     if manifest["status"] != "quarantined" or any(value != "stored" for value in progress) or manifest["error"] is not None:
         fail("incomplete_batch", "Only a complete, unchanged quarantined batch can be restored or purged automatically. Inspect any interrupted operation manually.")
+    preflight_manifest(manifest)
     items, info = safe_path(guard, relative + "/items")
     if not stat.S_ISDIR(info.st_mode) or {p.name for p in items.iterdir()} != {format(index, "04d") for index in range(len(progress))}:
         fail("invalid_batch", "Quarantine items differ from the recorded target set.")

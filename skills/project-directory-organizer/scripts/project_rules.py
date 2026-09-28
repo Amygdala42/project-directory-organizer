@@ -75,7 +75,7 @@ def relative_layout_path(value, guard, field, allow_file=False):
         base = part.split(".", 1)[0].upper()
         if base in {"CON", "PRN", "AUX", "NUL", "CLOCK$", "CONIN$", "CONOUT$"} or re.fullmatch(r"(?:COM|LPT)[1-9¹²³]", base):
             fail("invalid_layout", field + " contains a reserved device name.")
-    if len(parts) == 1 and parts[0].casefold() in {"agents.md", "project_rules.md"}:
+    if parts[0].casefold() in {"agents.md", "project_rules.md"}:
         fail("invalid_layout", field + " conflicts with a project rule document.")
     current = guard.path
     for index, part in enumerate(parts):
@@ -165,10 +165,11 @@ def layout_fields(layout, language):
             "## 成果归档", "",
             "- 成果位置：" + locations + "。",
             "- 以下批次与版本规则适用于这些位置中独立归档的报告或导出交付件；工具固定文件名、产物结构和被引用的稳定资源沿用原约定。",
-            "- 已有归档结构沿用；新建且无约定时，在对应位置下用 `" + batch + "` 建交付批次，日期取实际产出或修订日；实际产出或明确预留时才建，不强制成对建立结果与报告批次。",
-            "- 同日同次工作复用批次，不同用途分开。",
-            "- 独立交付文件沿用已有命名与版本约定；新建且无约定时采用 `" + filename + "`，修订递增且跨日连续，不覆盖旧版本；同次 PPT/PDF 使用相同主名和版本，配套材料共址。",
-            "- 跨日仅为新增或修订成果建立当日批次，不复制未变化材料；稳定维护的代码、数据和参考资料不随日期移动。",
+            "- 已有归档结构沿用，已有批次约定优先；新建且无约定时，在对应位置下用 `" + batch + "` 建交付批次，日期取实际产出或修订日；实际产出或明确预留时才建，不强制成对建立结果与报告批次。",
+            "- 同日同一逻辑交付批次复用，不同用途分开；同日同用途的独立批次用时间或有意义的序号区分。",
+            "- 独立交付文件沿用已有命名与版本约定；新建且无约定时采用 `" + filename + "`，修订递增且跨日连续，不覆盖旧版本；同次 PPT/PDF 使用相同主名和版本，配套材料共址并保持成套。",
+            "- 跨日仅为新增或修订成果建立当日批次，不复制未变化材料来填目录；明确需要自包含交付包时，可将必要依赖复制为交付快照并注明维护源，保留包的完整性，不形成第二维护主库；不可拆分的运行或交付跨日时可沿用约定批次，记录实际产出或修订时间，避免仅为日期拆开配套成果。",
+            "- 稳定维护的代码、数据和参考资料不随日期移动，稳定引用沿用原位置。",
         ))
     originals = "明确保留的输入原件保持内容、名称、位置和包结构；日常维护文件按任务与版本控制约定编辑。"
     if layout["originals"]:
