@@ -109,6 +109,43 @@ class VerifyTests(unittest.TestCase):
         report = self.call(self.policy(links=[{'source': 'docs/AGENTS.md', 'target': '规则.md'}]))
         self.assertEqual(report['checks'][0]['status'], 'pass')
 
+    def test_inline_code_in_link_label_keeps_the_real_link(self):
+        self.file('PROJECT_RULES.md')
+        self.file('AGENTS.md', 'Read [`PROJECT_RULES.md`](PROJECT_RULES.md).')
+        report = self.call(self.policy(links=[{'source': 'AGENTS.md', 'target': 'PROJECT_RULES.md'}]),
+                           '--strict')
+        self.assertTrue(report['compliant'])
+        self.assertEqual(report['checks'][0]['code'], 'link_present')
+
+    def test_comment_markers_in_inline_code_do_not_hide_a_real_link(self):
+        self.file('PROJECT_RULES.md')
+        self.file('AGENTS.md', 'Use `<!--` literally.\n\n'
+                  '[rules](PROJECT_RULES.md)\n\nUse `-->` literally.')
+        report = self.call(self.policy(links=[{'source': 'AGENTS.md', 'target': 'PROJECT_RULES.md'}]),
+                           '--strict')
+        self.assertTrue(report['compliant'])
+
+    def test_multiline_literals_in_labels_keep_the_real_link(self):
+        self.file('PROJECT_RULES.md')
+        policy = self.policy(links=[{'source': 'AGENTS.md', 'target': 'PROJECT_RULES.md'}])
+        for body in ('[Read `PROJECT\nRULES.md`](PROJECT_RULES.md)',
+                     '[Read <!-- internal\ncomment -->rules](PROJECT_RULES.md)'):
+            with self.subTest(body=body):
+                self.file('AGENTS.md', body)
+                self.assertTrue(self.call(policy, '--strict')['compliant'])
+
+    def test_code_and_comments_cannot_join_fragments_into_a_link(self):
+        self.file('PROJECT_RULES.md')
+        policy = self.policy(links=[{'source': 'AGENTS.md', 'target': 'PROJECT_RULES.md'}])
+        for body in ('[rules]`example`(PROJECT_RULES.md)',
+                     '[rules]<!-- example -->(PROJECT_RULES.md)',
+                     '`[rules](PROJECT_RULES.md)`',
+                     '<!-- `example\n\n[rules](PROJECT_RULES.md)\n\n` -->'):
+            with self.subTest(body=body):
+                self.file('AGENTS.md', body)
+                report = self.call(policy, '--strict', code=1)
+                self.assertEqual(report['checks'][0]['code'], 'link_missing')
+
     def test_escaped_and_multiline_code_links_do_not_satisfy_policy(self):
         self.file('PROJECT_RULES.md')
         policy = self.policy(links=[{'source': 'AGENTS.md', 'target': 'PROJECT_RULES.md'}])

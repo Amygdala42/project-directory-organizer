@@ -194,18 +194,42 @@ def inline_targets(document, source):
             continue
         if fence is None and not line.startswith(('    ', '\t')):
             lines.append(line)
-    visible = re.sub(r'<!--.*?-->', '', '\n'.join(lines), flags=re.S)
-    # Code spans may wrap lines, but cannot cross Markdown paragraph boundaries.
-    visible = ''.join(
-        re.sub(r'(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)', '', paragraph)
-        for paragraph in re.split(r'(\n[ \t]*\n)', visible)
-    )
+    visible = '\n'.join(lines)
 
     def escaped(index):
         start = index
         while start > 0 and visible[start - 1] == '\\':
             start -= 1
         return (index - start) % 2 == 1
+
+    # Mask literals in document order: comment markers inside code are text,
+    # and backticks inside comments do not open code spans. Keep spacing so a
+    # formatted label survives and separated fragments cannot become a link.
+    masked = list(visible)
+    tokens = re.compile(r'`+|<!--')
+    cursor = 0
+    while True:
+        token = tokens.search(visible, cursor)
+        if token is None:
+            break
+        cursor = token.end()
+        if escaped(token.start()):
+            continue
+        marker = token.group()
+        if marker == '<!--':
+            end = visible.find('-->', cursor)
+            if end < 0:
+                continue
+            end += 3
+        else:
+            # Code spans may wrap lines, but not cross paragraph boundaries.
+            closing = re.compile(r'(?<!`)' + marker + r'(?!`)').search(visible, cursor)
+            if closing is None or re.search(r'\n[ \t]*\n', visible[cursor:closing.start()]):
+                continue
+            end = closing.end()
+        masked[token.start():end] = [' '] * (end - token.start())
+        cursor = end
+    visible = ''.join(masked)
 
     # Parse balanced destination parentheses rather than assuming paths lack them.
     for match in re.finditer(r'(?<!!)\[[^\]\n]+\]\(\s*', visible):

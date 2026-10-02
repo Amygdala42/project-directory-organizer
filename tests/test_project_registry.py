@@ -441,6 +441,65 @@ class RegistryTests(unittest.TestCase):
                 plan = self.plan([project(outputs=[])], initialize_after="# Rules\n")
                 self.assertTrue(plan["ready_to_apply"], plan["blockers"])
 
+    def test_unmanaged_paths_rendered_by_base_plan_block_duplicate_registration(self):
+        for path in ("apps/tool_one", "apps/tool[one]", "apps/tool&one"):
+            with self.subTest(path=path):
+                self.rules.unlink()
+                layout = {"scope": "Software workspace", "directories": [{"path": path, "purpose": "Preserve original files"}],
+                          "environment": None, "outputs": [], "originals": []}
+                result = subprocess.run([sys.executable, "-B", "-X", "utf8", str(SCRIPT), "plan", str(self.root),
+                                         "--name", "workspace", "--language", "english", "--timezone", "UTC",
+                                         "--layout-file", "-"], input=json.dumps(layout), encoding="utf-8", capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.call("apply", json.loads(result.stdout))
+                before = self.snapshot()
+                anchor = self.rules.read_bytes().splitlines(keepends=True)[0].decode("utf-8")
+                plan = self.plan([project("record", path=path, outputs=[])], initialize_after=anchor)
+                self.assertFalse(plan["ready_to_apply"])
+                self.assertEqual(plan["diff"], "")
+                self.call("apply", plan, success=False)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_unmanaged_rendered_references_respect_path_identity_and_boundaries(self):
+        cases = (("apps/tool_one", "apps/tool_one/reports", True),
+                 ("apps/tool_one", r"APPS\TOOL_ONE\reports", True),
+                 ("apps/tool_one", r"APPS/TOOL\_ONE/reports", True),
+                 ("apps/caf\u00e9_one", "apps/cafe\u0301\\_one/reports", True),
+                 ("work/_alpha", r"work\_alpha\reports", True),
+                 ("apps/tool_one", r"apps/tool\_one\_extra/reports", False),
+                 ("apps/tool_one", r"apps/tool\_one[backup]/reports", False),
+                 ("apps/tool_one", r"apps/tool\_one-other/reports", False),
+                 ("apps/tool_one", r"other/apps/tool\_one/reports", False),
+                 ("apps/tool_one", r"other\apps\tool_one\reports", False),
+                 ("apps/tool&one", "apps/tool&amp;one_more/reports", False))
+        for path, reference, should_block in cases:
+            with self.subTest(path=path, reference=reference):
+                self.rules.write_bytes(("# Rules\n- Existing location: " + reference + "\n").encode("utf-8"))
+                before = self.snapshot()
+                plan = self.plan([project("record", path=path, outputs=[])], initialize_after="# Rules\n")
+                self.assertEqual(not plan["ready_to_apply"], should_block, plan["blockers"])
+                self.assertEqual(self.snapshot(), before)
+
+    def test_exact_before_migrates_unmanaged_rendered_path_without_touching_other_text(self):
+        for path, rendered in (("apps/tool_one", r"apps/tool\_one"),
+                               ("apps/tool[one]", r"apps/tool\[one\]"),
+                               ("apps/tool&one", "apps/tool&amp;one")):
+            with self.subTest(path=path):
+                legacy = "## Existing work\r\n| " + rendered + " | Preserve original files |\r\n"
+                suffix = b"\r\nKeep the separate appendix.\n"
+                self.rules.write_bytes(self.original + legacy.encode("utf-8") + suffix)
+                agents = (self.root / "AGENTS.md").read_bytes()
+                record = project("record", path=path, outputs=[], before=legacy)
+                plan = self.plan([record])
+                self.assertTrue(plan["ready_to_apply"], plan["blockers"])
+                self.call("apply", plan)
+                after = self.rules.read_bytes()
+                self.assertTrue(after.startswith(self.original))
+                self.assertTrue(after.endswith(suffix))
+                self.assertNotIn(legacy.encode("utf-8"), after)
+                self.assertEqual(after.count(b"project:start id=record "), 1)
+                self.assertEqual((self.root / "AGENTS.md").read_bytes(), agents)
+
     def test_changed_marker_line_ending_blocks_without_normalizing_body(self):
         for newline, changed in ((b"\r\n", b"\n"), (b"\n", b"\r\n")):
             for marker in (b":project:start", b":project:end"):

@@ -1,16 +1,20 @@
 # Project Directory Organizer
 
-当前版本：**v1.4.0** · [本版变更](docs/releases/v1.4.0.md) · [GitHub Release](https://github.com/Amygdala42/project-directory-organizer/releases/tag/v1.4.0)
+当前版本：**v1.4.1** · [本版变更](docs/releases/v1.4.1.md) · [GitHub Release](https://github.com/Amygdala42/project-directory-organizer/releases/tag/v1.4.1)
+
+本版增加多项目管理方式必答项，修复移动回退日志硬链接保护、项目登记转义引用识别及 Markdown 链接核对，并精简维护职责与重复说明。
 
 为 Codex 提供项目目录规划、文件风险检查与整理、成果归档、项目持续维护、只读盘点及精确删除恢复功能。支持中文或英文业务目录，结构按当前项目和任务选择，不预设行业、学科或完整目录套件。
 
 ## 工作方式
 
-1. 按顺序用短问题补齐位置、新建或整理、目录语言；仅在有命名差异时询问其处理方式，用途不明时补问用途。新建任务逐项确认未明的代码、运行数据和分析成果需求，独立环境另问，再核对影响本次工作的其他选项或旧约束。不做数据分析不等于无需代码或运行数据。
+1. 按顺序用短问题补齐位置、新建或整理、多个独立项目的管理方式、目录语言；单项目及 src/docs 等功能目录跳过管理方式题。仅在有命名差异时询问其处理方式，用途不明时补问用途。新建任务逐项确认未明的代码、运行数据和分析成果需求，独立环境另问，再核对影响本次工作的其他选项或旧约束。不做数据分析不等于无需代码或运行数据。
 2. 根据答案推荐较完整、可删减的框架，在正式回复中展示完整目录树、用途、已有/拟建内容和项目规则。用户可删减、合并或改名，每次修订重列完整方案。
 3. 收到明确的实际操作指令后，才执行其覆盖的范围。回答单项问题只更新该项，不代表授权创建。
 
 当前目标已有答案不重复问，未回答不代选。新增独立项目重新检查全部前置选项及适用约束；主根或旧项目的语言、分析、环境、成果、命名和共享安排不替新项目作答，必要项逐一确认。异步弹窗待答时保持当前回合等待，不发送结束回复或因普通超时重复弹窗；完整计划交付后才结束等待文字指令。模拟不会自动变成实际操作。整理时只移动检查充分且通过的独立组，有风险或无法确认的内容保留原位并给出建议。
+
+多项目管理方式未明确时，必须单独询问：“这些项目需要在同一个工作区统一管理，还是分别打开、各自独立维护？”已有明确答案或明确覆盖目标的管理约定可复用；共同父目录或 AGENTS.md 的存在不代表已选择。未答时不完成依赖该选择的布局。
 
 文件按“项目归属 → 用途与状态 → 关联 → 位置 → 命名”分类。所有目录都要明确主要内容、必要配套和应另存内容；新建或批量生成前安排好各类文件的角色与位置，整理时依据用途、状态和真实关联检查每条映射及整目录的全部后代，完成后复核并报告保留项。
 
@@ -22,7 +26,7 @@ $project-directory-organizer 主目录是 D:\Projects\my-project，用于说明�
 
 新建项目会生成 `AGENTS.md` 和 `PROJECT_RULES.md`：前者保存项目入口，并在已知时保留介绍、约束和简短当前进展；后者保存实际采用的目录、主要内容与必要配套、应另存内容及其位置、环境归属、命名、成果批次和文件保护规则。采用持续维护方案的项目还会写明任务记录、完成回填、状态归档和日志/临时文件约定。环境目录只预留时，不代表已安装软件。选定的报告和导出归档位置沿用已明确适用于当前目标的约定，日期、批次与版本格式仅按实际选择采用；关联源码素材和工具生成目录保留原生结构。
 
-同一主目录可管理多个独立小项目：总规则分别登记各项目的路径、用途、环境及成果约定，处理文件时先确定所属项目。同名配置和相似资料不跨项目合并；共享项需明确使用方。新增、改名或归档小项目时，在同一任务中增量维护对应规则，保留其他项目内容。规则同步由助手执行任务时完成，不是创建文件夹后自动运行的后台监控。详见[多子项目管理](skills/project-directory-organizer/references/subprojects.md)。
+多个独立项目按已选管理方式落地：统一管理时，工作区根维护两份规则及项目登记；独立维护时，每个项目根都有完整的 AGENTS.md 和 PROJECT_RULES.md，以各自根为环境与成果路径基准，不依赖父目录指针或建立共同总登记。同名配置和相似资料不跨项目合并；共享项需明确使用方。新增、改名或归档时，只同步相应范围的规则并保留其他项目内容。规则同步由助手执行任务时完成，不是后台监控。详见[多子项目管理](skills/project-directory-organizer/references/subprojects.md)。
 
 持续采集和自动化运行按需要确认批次方式：独立执行分别标识，明确续跑才复用，同一批次可跨日并记录实际时间。日期、运行批次与成果修订版本分别表达，不把一天所有输出混为一批。已有项目只补齐缺失约定，不强建目录或迁移历史文件；详见[运行与交付批次](skills/project-directory-organizer/references/directory-reference.md#5-成果与运行批次)。
 
@@ -40,15 +44,15 @@ v1.1.0 已提供四项能力：盘点摘要（按直接子目录、扩展名、�
 
 ## 下载与维护
 
-v1.4.0 发布文件：
+v1.4.1 发布文件：
 
 | 文件 | 适用用途 |
 | --- | --- |
-| [技能包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.4.0/project-directory-organizer-skill-v1.4.0.zip) | 使用技能；包含完整可安装技能目录，共20个文件。 |
-| [维护包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.4.0/project-directory-organizer-maintenance-v1.4.0.zip) | 开发与维护；包含发布时的源码、测试和文档，其中skills/下保存技能。 |
-| [SHA256SUMS.txt](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.4.0/SHA256SUMS.txt) | 核对两个ZIP的SHA-256。 |
+| [技能包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.4.1/project-directory-organizer-skill-v1.4.1.zip) | 使用技能；包含完整可安装技能目录，共20个文件。 |
+| [维护包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.4.1/project-directory-organizer-maintenance-v1.4.1.zip) | 开发与维护；包含发布时的源码、测试和文档，其中skills/下保存技能。 |
+| [SHA256SUMS.txt](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.4.1/SHA256SUMS.txt) | 核对两个ZIP的SHA-256。 |
 
-维护源为仓库的 `skills/project-directory-organizer/`，已安装技能是使用副本。更新时核对版本及全部相对文件路径和SHA-256，不能只比较SKILL.md。发布包固定对应版本标签；main分支可继续补充文档，具体快照和发布核验见[发布记录](docs/releases/v1.4.0.md#发布状态与校验)。
+维护源为仓库的 `skills/project-directory-organizer/`，已安装技能是使用副本。更新时核对版本及全部相对文件路径和SHA-256，不能只比较SKILL.md。发布包固定对应版本标签；main分支可继续补充文档，具体快照和发布核验见[发布记录](docs/releases/v1.4.1.md#发布状态与校验)。
 
 ## 运行条件
 
@@ -77,11 +81,15 @@ v1.4.0 发布文件：
 │  │  ├─ v1.2.0.md
 │  │  ├─ v1.3.0.md
 │  │  ├─ v1.3.1.md
-│  │  └─ v1.4.0.md
+│  │  ├─ v1.4.0.md
+│  │  └─ v1.4.1.md
 │  └─ superpowers/
 │     └─ plans/
 │        ├─ 2026-10-01-v1.1.0.md
-│        └─ 2026-10-02-v1.4.0.md
+│        ├─ 2026-10-02-v1.4.0.md
+│        ├─ 2026-10-02-management-mode-question.md
+│        ├─ 2026-10-02-audit-fixes.md
+│        └─ 2026-10-02-v1.4.1.md
 ├─ skills/
 │  └─ project-directory-organizer/
 │     ├─ SKILL.md
@@ -96,7 +104,7 @@ v1.4.0 发布文件：
 
 维护本仓库时，从根目录的 [AGENTS.md](AGENTS.md) 读取 [PROJECT_RULES.md](PROJECT_RULES.md)。这两份规则只用于维护本仓库；技能包内的 `assets/templates/` 是为目标项目生成规则的模板，不是本仓库的生效规则。
 
-[v1.4.0 实施记录](docs/superpowers/plans/2026-10-02-v1.4.0.md) 保存本次任务的目标、改动和实际验证结果；[v1.1.0 开发计划](docs/superpowers/plans/2026-10-01-v1.1.0.md) 保留当时的实施过程与设计约束。当前使用方式见使用说明，各版本变更和验证结果见发布说明。
+[当前任务：v1.4.1 发布](docs/superpowers/plans/2026-10-02-v1.4.1.md) 保存本次发布范围与验证结果；[本地审查修复](docs/superpowers/plans/2026-10-02-audit-fixes.md) 记录修复过程。[v1.4.0 实施记录](docs/superpowers/plans/2026-10-02-v1.4.0.md) 和 [v1.1.0 开发计划](docs/superpowers/plans/2026-10-01-v1.1.0.md) 保留历史过程与设计约束。当前使用方式见使用说明，各版本变更和验证结果见发布说明。
 
 ## 验证
 

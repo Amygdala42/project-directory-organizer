@@ -539,6 +539,17 @@ def exact_text_span(raw, text, literal_ranges):
     return start, end
 
 
+def unmanaged_project_reference(text, value):
+    """Match raw paths or our rendered spelling without decoding unrelated text."""
+    forms = ((value, r"(?![\w-])"),
+             (markdown_text(value), r"(?![\w-]|\\[`*_{}\[\]()|#]|\[|&(?:amp|lt|gt);)"))
+    for spelling, boundary in forms:
+        reference = re.escape(path_key(spelling)).replace("/", r"[/\\]")
+        if re.search(r"(?<![\w/\\-])" + reference + boundary, text):
+            return True
+    return False
+
+
 def make_update_plan(root, request):
     guard = RootGuard(root)
     request = validate_projects(request, guard)
@@ -589,13 +600,12 @@ def make_update_plan(root, request):
         outside.append(raw[previous:start])
         previous = end
     outside.append(raw[previous:])
-    unmanaged = b"\n".join(outside).decode("utf-8")
+    unmanaged = path_key(b"\n".join(outside).decode("utf-8"))
     if re.search(r"(?im)^\s*(?:#{1,6}\s*)?(?:子项目登记|项目登记|subproject registry|project registry|projects registry|registered projects|project register)", unmanaged):
         block("An unmanaged project registry already exists; migrate its exact project sections without creating a second registry.")
     for record in request["projects"]:
         for value in (record["id"], record["path"]):
-            reference = re.escape(value).replace("/", r"[/\\]")
-            if re.search(r"(?<![\w/\\-])" + reference + r"(?![\w-])", unmanaged, re.IGNORECASE):
+            if unmanaged_project_reference(unmanaged, value):
                 block("An unmanaged reference to this project needs an exact legacy binding before registration: " + record["id"])
                 break
 

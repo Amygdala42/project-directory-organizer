@@ -93,6 +93,89 @@ class SafeMoveTests(unittest.TestCase):
         self.assertFalse((self.root / 'reports/draft.txt').exists())
 
     @unittest.skipUnless(os.name == 'nt', 'Mutations require Windows no-overwrite rename.')
+    def test_hardlinked_data_file_still_moves_and_rolls_back(self):
+        alias = self.case / 'outside-data.txt'
+        os.link(self.root / 'draft.txt', alias)
+        self.assertEqual(self.apply(self.plan())['status'], 'applied')
+        self.assertEqual(alias.read_bytes(), b'draft')
+        self.assertEqual(self.rollback()['status'], 'rolled_back')
+        self.assertEqual((self.root / 'draft.txt').read_bytes(), b'draft')
+        self.assertEqual(alias.read_bytes(), b'draft')
+        self.assertEqual((self.root / 'draft.txt').stat().st_ino, alias.stat().st_ino)
+
+    @unittest.skipUnless(os.name == 'nt', 'Journal mutations use Windows locks.')
+    def test_hardlinked_journal_blocks_rollback_preview_and_saved_confirmation(self):
+        self.apply(self.plan())
+        preview = self.call('rollback-plan', '--log', 'records/move.jsonl')
+        log = self.root / 'records/move.jsonl'
+        alias = self.case / 'outside-journal.jsonl'
+        os.link(log, alias)
+        before = alias.read_bytes()
+        result = self.call('rollback-plan', '--log', 'records/move.jsonl', success=False)
+        self.assertEqual(result['error']['code'], 'journal_hardlink')
+        result = self.call('rollback', '--log', 'records/move.jsonl', '--confirm', preview['rollback_digest'], success=False)
+        self.assertEqual(result['error']['code'], 'journal_hardlink')
+        self.assertEqual(log.read_bytes(), before)
+        self.assertEqual(alias.read_bytes(), before)
+        self.assertFalse((self.root / 'draft.txt').exists())
+        self.assertEqual((self.root / 'reports/draft.txt').read_bytes(), b'draft')
+
+    @unittest.skipUnless(os.name == 'nt', 'Journal mutations use Windows locks.')
+    def test_journal_hardlink_added_before_open_stops_rollback(self):
+        from contextlib import contextmanager
+        from unittest.mock import patch
+
+        self.apply(self.plan())
+        preview = self.call('rollback-plan', '--log', 'records/move.jsonl')
+        module = load_move_module()
+        original_lock = module.journal_lock
+        log = self.root / 'records/move.jsonl'
+        alias = self.case / 'outside-journal.jsonl'
+        before = log.read_bytes()
+
+        @contextmanager
+        def link_before_open(path, create=False):
+            os.link(path, alias)
+            with original_lock(path, create=create) as handle:
+                yield handle
+
+        with patch.object(module, 'journal_lock', link_before_open):
+            with self.assertRaises(module.OperationError) as raised:
+                module.rollback(module.RootGuard(self.root), 'records/move.jsonl', preview['rollback_digest'])
+        self.assertEqual(raised.exception.code, 'journal_hardlink')
+        self.assertEqual(log.read_bytes(), before)
+        self.assertEqual(alias.read_bytes(), before)
+        self.assertFalse((self.root / 'draft.txt').exists())
+        self.assertEqual((self.root / 'reports/draft.txt').read_bytes(), b'draft')
+
+    @unittest.skipUnless(os.name == 'nt', 'Journal mutations use Windows locks.')
+    def test_open_journal_hardlink_added_before_append_stops_rollback(self):
+        from unittest.mock import patch
+
+        self.apply(self.plan())
+        preview = self.call('rollback-plan', '--log', 'records/move.jsonl')
+        module = load_move_module()
+        original_encoded = module.encoded
+        log = self.root / 'records/move.jsonl'
+        alias = self.case / 'outside-journal.jsonl'
+        before = log.read_bytes()
+
+        def link_before_append(value):
+            raw = original_encoded(value)
+            if value.get('event') == 'rollback_moving':
+                os.link(log, alias)
+            return raw
+
+        with patch.object(module, 'encoded', link_before_append):
+            with self.assertRaises(module.OperationError) as raised:
+                module.rollback(module.RootGuard(self.root), 'records/move.jsonl', preview['rollback_digest'])
+        self.assertEqual(raised.exception.code, 'journal_hardlink')
+        self.assertEqual(log.read_bytes(), before)
+        self.assertEqual(alias.read_bytes(), before)
+        self.assertFalse((self.root / 'draft.txt').exists())
+        self.assertEqual((self.root / 'reports/draft.txt').read_bytes(), b'draft')
+
+    @unittest.skipUnless(os.name == 'nt', 'Mutations require Windows no-overwrite rename.')
     def test_bracket_filename_moves_literally_and_rolls_back(self):
         source = 'review [ab].pdf'
         self.write(source, 'selected report')

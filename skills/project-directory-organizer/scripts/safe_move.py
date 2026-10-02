@@ -310,11 +310,17 @@ def journal_path(guard, relative, plan, missing=False):
     return path, info
 
 
+def check_journal_links(info):
+    if info.st_nlink != 1:
+        fail('journal_hardlink', 'A writable journal must have exactly one filesystem link; retain the log and review its linked locations before recovery.')
+
+
 @contextmanager
 def journal_lock(path, create=False):
     """Lock the visible journal itself; no hidden lock, state or cache files."""
     import msvcrt
     with path.open('x+b' if create else 'r+b') as handle:
+        check_journal_links(os.fstat(handle.fileno()))
         try:
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError:
@@ -332,6 +338,8 @@ def append(handle, event, previous):
         fail('journal_changed', 'The journal changed during execution; stop and inspect it.')
     raw = encoded(event)
     handle.seek(0, 2)
+    # Check the open file, including links added since planning or opening it.
+    check_journal_links(os.fstat(handle.fileno()))
     handle.write(raw)
     handle.flush()
     os.fsync(handle.fileno())
@@ -412,6 +420,7 @@ def load_journal(guard, relative):
     path, info = safe_path(guard, relative)
     if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_JOURNAL_BYTES:
         fail('invalid_log', 'Journal must be a regular file of at most 64 MiB.')
+    check_journal_links(info)
     raw = path.read_bytes()
     try:
         events = [json.loads(line, object_pairs_hook=unique_json) for line in raw.decode('utf-8').splitlines()]
