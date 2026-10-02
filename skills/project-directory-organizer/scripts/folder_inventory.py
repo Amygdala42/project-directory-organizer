@@ -13,10 +13,11 @@ sys.dont_write_bytecode = True
 
 import argparse
 from collections import deque
+from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import stat
 
 from path_safety import RootGuard, OperationError, is_reparse
@@ -186,6 +187,77 @@ def inventory(root, max_depth=None, max_entries=10000, include_generated=False):
     return report
 
 
+def summarize(report, top=10):
+    """Render listed metadata without entries, I/O, or changes to the report.
+
+    Original scan state and totals remain intact. Aggregations are exhaustive
+    over listed entries; only file rankings are limited by top. Ages use the
+    scan's finished_utc, never the time at which this renderer is called.
+    """
+    if type(top) is not int or top < 1:
+        raise OperationError("arguments", "top must be a positive integer.")
+    result = deepcopy({key: value for key, value in report.items() if key != "entries"})
+    summary = result["summary"]
+
+    def parsed_time(value):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.astimezone(timezone.utc) if parsed.tzinfo is not None else None
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            return None
+
+    reference = parsed_time(report.get("finished_utc"))
+    buckets = {age: {"age": age, "files": 0, "file_bytes": 0}
+               for age in ("<7d", "7-30d", "30-90d", "90-365d", ">=365d", "future", "unknown")}
+    groups, extensions, files, recent = {}, {}, [], []
+    for item in report["entries"]:
+        path, kind = item["path"], item["type"]
+        group_path = path.split("/", 1)[0] if "/" in path or kind == "directory" else "."
+        group = groups.setdefault(group_path, {
+            "path": group_path, "entries": 0, "files": 0, "directories": 0,
+            "reparse_points": 0, "other_or_unavailable": 0, "file_bytes": 0,
+        })
+        group["entries"] += 1
+        category = {"file": "files", "directory": "directories", "reparse_point": "reparse_points"}.get(
+            kind, "other_or_unavailable")
+        group[category] += 1
+        if kind != "file":
+            continue
+        size = item["size_bytes"]
+        group["file_bytes"] += size
+        extension = PurePosixPath(path).suffix.casefold()
+        extension_group = extensions.setdefault(extension, {"extension": extension, "files": 0, "file_bytes": 0})
+        extension_group["files"] += 1
+        extension_group["file_bytes"] += size
+        file_item = {"path": path, "size_bytes": size, "modified_utc": item.get("modified_utc")}
+        files.append(file_item)
+        modified = parsed_time(item.get("modified_utc"))
+        age = "unknown"
+        if reference is not None and modified is not None:
+            seconds = (reference - modified).total_seconds()
+            if seconds < 0:
+                age = "future"
+            else:
+                age = ">=365d"
+                for days, label in ((7, "<7d"), (30, "7-30d"), (90, "30-90d"), (365, "90-365d")):
+                    if seconds < days * 86400:
+                        age = label
+                        break
+                recent.append((seconds, file_item))
+        buckets[age]["files"] += 1
+        buckets[age]["file_bytes"] += size
+    summary.update(
+        top=top,
+        reference_utc=report.get("finished_utc") if reference is not None else None,
+        by_top_level=sorted(groups.values(), key=lambda item: (-item["file_bytes"], item["path"])),
+        by_extension=sorted(extensions.values(), key=lambda item: (-item["file_bytes"], item["extension"])),
+        by_modified_age=list(buckets.values()),
+        largest_files=sorted(files, key=lambda item: (-item["size_bytes"], item["path"]))[:top],
+        recently_modified_files=[item for _, item in sorted(recent, key=lambda pair: (pair[0], pair[1]["path"]))[:top]],
+    )
+    return result
+
+
 class JsonArgumentParser(argparse.ArgumentParser):
     def error(self, message):
         raise OperationError("arguments", message)
@@ -200,9 +272,15 @@ def main(argv=None):
                         help="Maximum number of listed entries (default: 10000)")
     parser.add_argument("--include-generated", action="store_true",
                         help="Also expand common dependency/cache directories; links are still never followed")
+    parser.add_argument("--summary", action="store_true",
+                        help="Omit detailed entries and add metadata summaries; preserve all scan state")
+    parser.add_argument("--top", type=positive_integer, default=10,
+                        help="Number of files in each summary ranking (default: 10); does not change scanning")
     try:
         args = parser.parse_args(argv)
         result = inventory(args.root, args.max_depth, args.max_entries, args.include_generated)
+        if args.summary:
+            result = summarize(result, args.top)
         exit_code = 0
     except OperationError as error:
         result, exit_code = {"status": "error", "code": error.code, "message": str(error)}, 1

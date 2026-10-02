@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import difflib
 import hashlib
 import json
 import os
@@ -30,6 +31,10 @@ FILES = ("PROJECT_RULES.md", "AGENTS.md")
 TOKEN = re.compile(r"\{\{([A-Z_]+)\}\}")
 START = "<!-- project-directory-organizer:rules:start -->"
 END = "<!-- project-directory-organizer:rules:end -->"
+PROJECT_MARKER = "project-directory-organizer:project"
+PROJECT_ID = r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
+PROJECT_START = re.compile(r"<!-- project-directory-organizer:project:start id=(" + PROJECT_ID + r") path=(.+) sha256=([0-9a-f]{64}) -->")
+PROJECT_END = re.compile(r"<!-- project-directory-organizer:project:end id=(" + PROJECT_ID + r") -->")
 
 
 def digest(data):
@@ -98,8 +103,8 @@ def path_key(value):
 
 def validate_layout(layout, guard):
     fields = {"directories", "environment", "outputs", "originals"}
-    if not isinstance(layout, dict) or set(layout) not in (fields | {"scope"}, fields | {"research"}):
-        fail("invalid_layout", "Layout must contain scope, directories, environment, outputs, and originals. The legacy research key may replace scope, but cannot appear alongside it.")
+    if not isinstance(layout, dict) or set(layout) - {"rules"} not in (fields | {"scope"}, fields | {"research"}):
+        fail("invalid_layout", "Layout must contain scope, directories, environment, outputs, and originals; rules is optional. The legacy research key may replace scope, but cannot appear alongside it.")
     scope_field = "scope" if "scope" in layout else "research"
     scope = layout_text(layout[scope_field], scope_field)
     rows = layout["directories"]
@@ -140,7 +145,16 @@ def validate_layout(layout, guard):
             a, b = path_key(original), path_key(output)
             if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
                 fail("invalid_layout", "Original-material and output locations must not overlap or contain one another.")
-    return {"scope": scope, "directories": directories, "environment": environment, **lists}
+    result = {"scope": scope, "directories": directories, "environment": environment, **lists}
+    if "rules" in layout:
+        rules = layout["rules"]
+        if not isinstance(rules, list) or len(rules) > 500:
+            fail("invalid_layout", "rules must be a list of at most 500 confirmed single-line rules.")
+        rules = [layout_text(rule, "rule") for rule in rules]
+        if any("project-directory-organizer:" in rule.lower() for rule in rules):
+            fail("invalid_layout", "rules must not contain reserved rule markers.")
+        result["rules"] = rules
+    return result
 
 
 def markdown_text(value):
@@ -159,22 +173,20 @@ def layout_fields(layout, language):
     outputs = ""
     if layout["outputs"]:
         locations = "、".join(quoted_path(path) for path in layout["outputs"])
-        batch = "YYYYMMDD用途" if language == "chinese" else "YYYYMMDD-purpose"
-        filename = "内容名_v01.ext" if language == "chinese" else "content-name_v01.ext"
         outputs = "\n".join((
             "## 成果归档", "",
             "- 成果位置：" + locations + "。",
-            "- 以下批次与版本规则适用于这些位置中独立归档的报告或导出交付件；工具固定文件名、产物结构和被引用的稳定资源沿用原约定。",
-            "- 已有归档结构沿用，已有批次约定优先；新建且无约定时，在对应位置下用 `" + batch + "` 建交付批次，日期取实际产出或修订日；实际产出或明确预留时才建，不强制成对建立结果与报告批次。",
-            "- 同日同一逻辑交付批次复用，不同用途分开；同日同用途的独立批次用时间或有意义的序号区分。",
-            "- 独立交付文件沿用已有命名与版本约定；新建且无约定时采用 `" + filename + "`，修订递增且跨日连续，不覆盖旧版本；同次 PPT/PDF 使用相同主名和版本，配套材料共址并保持成套。",
-            "- 跨日仅为新增或修订成果建立当日批次，不复制未变化材料来填目录；明确需要自包含交付包时，可将必要依赖复制为交付快照并注明维护源，保留包的完整性，不形成第二维护主库；不可拆分的运行或交付跨日时可沿用约定批次，记录实际产出或修订时间，避免仅为日期拆开配套成果。",
+            "- 以下约定适用于这些位置中独立归档的报告或导出交付件；工具固定文件名、产物结构和被引用的稳定资源沿用原约定。",
+            "- 已有归档结构沿用，独立交付文件沿用已有命名与版本约定。日期、编号、版本和批次层级仅按本项目明确采用的规则使用，不因选择成果位置自动增加。",
+            "- 配套成果保持关联和成套，修订不得静默覆盖已有内容；不为填目录而复制未变化材料。",
+            "- 明确需要自包含交付包时，可将必要依赖复制为交付快照并注明维护源，保留包的完整性，不形成第二维护主库。",
             "- 稳定维护的代码、数据和参考资料不随日期移动，稳定引用沿用原位置。",
         ))
     originals = "明确保留的输入原件保持内容、名称、位置和包结构；日常维护文件按任务与版本控制约定编辑。"
     if layout["originals"]:
         originals = "原件位置：" + "、".join(quoted_path(path) for path in layout["originals"]) + "。" + originals
-    return {"PROJECT_SCOPE": "本文件所在目录为主项目根目录，下列路径均相对此目录。当前工作范围：" + markdown_text(layout["scope"]) + "。", "DIRECTORY_TABLE": table, "ENVIRONMENT_RULE": environment, "OUTPUT_RULES": outputs, "ORIGINAL_RULES": originals}
+    return {"PROJECT_SCOPE": "本文件所在目录为主项目根目录，下列路径均相对此目录。当前工作范围：" + markdown_text(layout["scope"]) + "。", "DIRECTORY_TABLE": table, "ENVIRONMENT_RULE": environment, "OUTPUT_RULES": outputs, "ORIGINAL_RULES": originals,
+            "CONFIRMED_RULES": "\n".join("- " + markdown_text(rule) for rule in layout.get("rules", []))}
 
 
 def templates(config, layout, include_rules):
@@ -182,7 +194,7 @@ def templates(config, layout, include_rules):
         "PROJECT_NAME": config["name"], "TIMEZONE": config["timezone"],
         "LANGUAGE": "中文" if config["language"] == "chinese" else "English",
         "RULES_FILE": "PROJECT_RULES.md",
-        "NAMING_RULE": ("自建业务目录用清楚、简短的中文名称。" if config["language"] == "chinese" else "自建业务目录用小写 ASCII 英文和连字符。") + "文件名沿用已有项目、工具和原件约定；独立交付文件另见成果归档规则。",
+        "NAMING_RULE": ("自建业务目录用清楚、简短的中文名称。" if config["language"] == "chinese" else "自建业务目录用清楚、简短的英文名称。") + "同一层级保持风格一致；文件名沿用已有项目、工具和原件约定，日期、编号、分隔方式和版本格式按项目实际采用的规则确定。",
     }
     if layout is not None:
         values.update(layout_fields(layout, config["language"]))
@@ -304,6 +316,293 @@ def make_plan(root, config, layout=None):
     return plan
 
 
+def registry_text(value, field):
+    value = layout_text(value, field)
+    if "project-directory-organizer:" in value.lower():
+        fail("invalid_projects", field + " must not contain reserved rule markers.")
+    return value
+
+
+def paths_overlap(first, second):
+    first, second = path_key(first), path_key(second)
+    return first == second or first.startswith(second + "/") or second.startswith(first + "/")
+
+
+def validate_projects(request, guard):
+    if not isinstance(request, dict) or not set(request) <= {"projects", "initialize_after"} or "projects" not in request:
+        fail("invalid_projects", "Input must contain projects and optionally initialize_after.")
+    rows = request["projects"]
+    if not isinstance(rows, list) or not rows or len(rows) > 500:
+        fail("invalid_projects", "projects must contain 1 to 500 explicitly confirmed project records.")
+    fields = {"id", "path", "purpose", "status", "language", "environment", "outputs", "rules"}
+    records, identifiers, paths = [], set(), []
+    for row in rows:
+        if not isinstance(row, dict) or set(row) not in (fields, fields | {"before"}):
+            fail("invalid_projects", "Each project needs id, path, purpose, status, language, environment, outputs, and rules; before is optional.")
+        identifier = row["id"]
+        if not isinstance(identifier, str) or re.fullmatch(PROJECT_ID, identifier) is None or identifier.casefold() in identifiers:
+            fail("invalid_projects", "Project ids must be unique ASCII letters, numbers, underscores, or hyphens, starting with a letter or number, at most 64 characters.")
+        identifiers.add(identifier.casefold())
+        path = relative_layout_path(row["path"], guard, "project path")
+        if any(paths_overlap(path, other) for other in paths):
+            fail("invalid_projects", "Independent project roots must not overlap or contain one another.")
+        paths.append(path)
+        if row["status"] not in ("planned", "active", "archived") or row["language"] not in ("chinese", "english"):
+            fail("invalid_projects", "status must be planned/active/archived and language must be chinese/english.")
+        environment = row["environment"]
+        if environment is not None:
+            environment = relative_layout_path(environment, guard, "environment")
+        outputs, seen = [], set()
+        if not isinstance(row["outputs"], list) or len(row["outputs"]) > 500:
+            fail("invalid_projects", "outputs must be a list of at most 500 root-relative locations.")
+        for output in row["outputs"]:
+            output = relative_layout_path(output, guard, "output")
+            if path_key(output) in seen:
+                fail("invalid_projects", "Output paths must be unique.")
+            seen.add(path_key(output))
+            outputs.append(output)
+        for location in outputs + ([environment] if environment is not None else []):
+            if not path_key(location).startswith(path_key(path) + "/"):
+                fail("invalid_projects", "Environment and output locations must be strictly inside their own project root, using full root-relative paths.")
+        if environment is not None and any(paths_overlap(environment, output) for output in outputs):
+            fail("invalid_projects", "Environment and output locations must not overlap.")
+        rules = row["rules"]
+        if not isinstance(rules, list) or len(rules) > 500:
+            fail("invalid_projects", "rules must be a list of at most 500 single-line rules.")
+        record = {"id": identifier, "path": path, "purpose": registry_text(row["purpose"], "purpose"),
+                  "status": row["status"], "language": row["language"], "environment": environment,
+                  "outputs": outputs, "rules": [registry_text(rule, "rule") for rule in rules]}
+        if "before" in row:
+            if not isinstance(row["before"], str) or not row["before"] or PROJECT_MARKER in row["before"]:
+                fail("invalid_projects", "before must be nonempty exact legacy text without managed project markers.")
+            record["before"] = row["before"]
+        records.append(record)
+    result = {"projects": records}
+    if "initialize_after" in request:
+        if not isinstance(request["initialize_after"], str) or PROJECT_MARKER in request["initialize_after"]:
+            fail("invalid_projects", "initialize_after must be exact existing text without managed project markers.")
+        result["initialize_after"] = request["initialize_after"]
+    return result
+
+
+def project_block(record, newline):
+    """Render one independently owned record; its digest covers exact body bytes."""
+    lines = ["## Project " + record["id"], "", "| Field | Confirmed value |", "| --- | --- |",
+             "| Project id | " + record["id"] + " |", "| Root-relative path | " + markdown_text(record["path"]) + " |",
+             "| Purpose | " + markdown_text(record["purpose"]) + " |", "| Status | " + record["status"] + " |",
+             "| Directory language | " + record["language"] + " |",
+             "| Environment | " + (markdown_text(record["environment"]) if record["environment"] else "None selected; existing tool locations remain unchanged.") + " |",
+             "| Outputs | " + ("; ".join(markdown_text(value) for value in record["outputs"]) or "None selected.") + " |", ""]
+    lines.extend("- " + markdown_text(rule) for rule in record["rules"])
+    if not record["rules"]:
+        lines.append("No additional project-specific rules confirmed.")
+    body = (newline.join(lines) + newline).encode("utf-8")
+    start = "<!-- project-directory-organizer:project:start id=" + record["id"] + " path=" + record["path"] + " sha256=" + digest(body) + " -->"
+    end = "<!-- project-directory-organizer:project:end id=" + record["id"] + " -->"
+    return (start + newline).encode("utf-8") + body + (end + newline).encode("utf-8")
+
+
+def scan_project_blocks(raw, guard):
+    """Conservative line scanner: marker ambiguity is a blocker, never recovery."""
+    blocks, blockers, literal_ranges = [], [], []
+    fence, opened, offset = None, None, 0
+    identifiers, paths = set(), []
+
+    def block(code, reason):
+        blockers.append({"path": "PROJECT_RULES.md", "code": code, "reason": reason})
+
+    for line in raw.splitlines(keepends=True):
+        end = offset + len(line)
+        text = line.decode("utf-8").rstrip("\r\n")
+        if offset == 0:
+            text = text.lstrip("\ufeff")
+        expanded = text.expandtabs(4)
+        was_fenced = fence is not None
+        literal = was_fenced or expanded.startswith("    ")
+        opening = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", expanded)
+        if was_fenced:
+            character, minimum = fence
+            if re.fullmatch(r" {0,3}" + re.escape(character) + "{" + str(minimum) + r",}[ \t]*", expanded):
+                fence = None
+        elif opening:
+            fence = (opening.group(1)[0], len(opening.group(1)))
+            literal = True
+        if literal:
+            literal_ranges.append((offset, end))
+        if PROJECT_MARKER in text:
+            start_match, end_match = PROJECT_START.fullmatch(text), PROJECT_END.fullmatch(text)
+            if literal or not (start_match or end_match):
+                block("manual_merge_required", "A project marker is damaged, embedded in text, or inside a code block.")
+            elif start_match:
+                identifier, path, checksum = start_match.groups()
+                if opened is not None:
+                    block("manual_merge_required", "Managed project blocks must not be nested.")
+                if identifier.casefold() in identifiers:
+                    block("manual_merge_required", "A managed project id appears more than once: " + identifier)
+                identifiers.add(identifier.casefold())
+                try:
+                    normalized = relative_layout_path(path, guard, "registered project path")
+                    if normalized != path or any(paths_overlap(path, other) for other in paths):
+                        block("manual_merge_required", "Existing project root registrations overlap or are not canonical.")
+                    paths.append(path)
+                except OperationError as error:
+                    block("manual_merge_required", "Existing registered project path needs review: " + str(error))
+                marker_offset = offset + (3 if offset == 0 and line.startswith(b"\xef\xbb\xbf") else 0)
+                opened = {"id": identifier, "path": path, "sha256": checksum, "start": marker_offset, "body_start": end,
+                          "newline": "\r\n" if line.endswith(b"\r\n") else "\n"}
+            else:
+                identifier = end_match.group(1)
+                if opened is None or identifier != opened["id"]:
+                    block("manual_merge_required", "Managed project start/end markers are missing or mismatched.")
+                else:
+                    body = raw[opened["body_start"]:offset]
+                    if digest(body) != opened["sha256"]:
+                        block("managed_content_changed", "Generated body was edited manually; preserve it and merge explicitly: " + identifier)
+                    expected_newline = opened["newline"].encode("ascii")
+                    managed_lines = raw[opened["start"]:end].splitlines(keepends=True)
+                    if any(part[len(part.rstrip(b"\r\n")):] != expected_newline for part in managed_lines):
+                        block("managed_content_changed", "Managed markers and body must use the same LF or CRLF line endings; preserve the edited bytes: " + identifier)
+                    body_lines = body.decode("utf-8").splitlines()
+                    if not body_lines or body_lines[0] != "## Project " + identifier or "| Project id | " + identifier + " |" not in body_lines or "| Root-relative path | " + markdown_text(opened["path"]) + " |" not in body_lines:
+                        block("manual_merge_required", "Managed project identity/path markers disagree with their body: " + identifier)
+                    opened["end"] = end
+                    blocks.append(opened)
+                opened = None
+        offset = end
+    if opened is not None:
+        block("manual_merge_required", "A managed project block is missing its end marker.")
+    if fence is not None:
+        block("manual_merge_required", "An unclosed Markdown fence makes safe project insertion ambiguous.")
+    return blocks, blockers, literal_ranges
+
+
+def exact_text_span(raw, text, literal_ranges):
+    data = text.encode("utf-8")
+    if not data or raw.count(data) != 1:
+        return None
+    start = raw.index(data)
+    end = start + len(data)
+    if (start and raw[start - 1:start] != b"\n") or (end != len(raw) and raw[end - 1:end] != b"\n"):
+        return None
+    if any(start < last and end > first for first, last in literal_ranges):
+        return None
+    return start, end
+
+
+def make_update_plan(root, request):
+    guard = RootGuard(root)
+    request = validate_projects(request, guard)
+    raw, before = read_item(guard, "PROJECT_RULES.md")
+    if raw is None:
+        fail("rules_required", "Incremental update requires an existing PROJECT_RULES.md; create the base documents with plan first.")
+    try:
+        original = raw.decode("utf-8")
+    except UnicodeError:
+        fail("encoding", "Existing PROJECT_RULES.md is not UTF-8; preserve it and merge manually.")
+    blocks, blockers, literal_ranges = scan_project_blocks(raw, guard)
+
+    def block(reason, code="manual_merge_required"):
+        blockers.append({"path": "PROJECT_RULES.md", "code": code, "reason": reason})
+
+    by_id = {item["id"].casefold(): item for item in blocks}
+    newline = "\r\n" if b"\r\n" in raw else "\n"
+    edits, additions, migrated_spans = [], [], []
+    for record in request["projects"]:
+        existing = by_id.get(record["id"].casefold())
+        if existing is not None:
+            if "before" in record:
+                block("before cannot replace an already managed project; preserve and review its current marked body.")
+            if existing["id"] != record["id"]:
+                block("An existing project id differs only in case; do not silently change its identity.")
+            start, end = existing["start"], existing["end"]
+            replacement = project_block(record, existing["newline"])
+            if raw[start:end] != replacement:
+                edits.append((start, end, replacement))
+        elif "before" in record:
+            span = exact_text_span(raw, record["before"], literal_ranges)
+            if span is None or span == (0, len(raw)):
+                block("before must identify one exact complete legacy section outside code, and must not replace the entire document.")
+            elif any(span[0] < item["end"] and span[1] > item["start"] for item in blocks):
+                block("Legacy migration overlaps an existing managed project.")
+            else:
+                migrated_spans.append(span)
+                edits.append((*span, project_block(record, newline)))
+        else:
+            additions.append(project_block(record, newline))
+
+    # Existing blocks and explicit legacy bindings are the only owned spans.
+    owned = sorted([(item["start"], item["end"]) for item in blocks] + migrated_spans)
+    outside, previous = [], 0
+    for start, end in owned:
+        if start < previous:
+            block("Explicit legacy project sections overlap; review the bindings manually.")
+        outside.append(raw[previous:start])
+        previous = end
+    outside.append(raw[previous:])
+    unmanaged = b"\n".join(outside).decode("utf-8")
+    if re.search(r"(?im)^\s*(?:#{1,6}\s*)?(?:子项目登记|项目登记|subproject registry|project registry|projects registry|registered projects|project register)", unmanaged):
+        block("An unmanaged project registry already exists; migrate its exact project sections without creating a second registry.")
+    for record in request["projects"]:
+        for value in (record["id"], record["path"]):
+            reference = re.escape(value).replace("/", r"[/\\]")
+            if re.search(r"(?<![\w/\\-])" + reference + r"(?![\w-])", unmanaged, re.IGNORECASE):
+                block("An unmanaged reference to this project needs an exact legacy binding before registration: " + record["id"])
+                break
+
+    resulting_paths = {item["id"].casefold(): item["path"] for item in blocks}
+    resulting_paths.update({row["id"].casefold(): row["path"] for row in request["projects"]})
+    paths = list(resulting_paths.items())
+    for index, (identifier, path) in enumerate(paths):
+        if any(paths_overlap(path, other) for _, other in paths[index + 1:]):
+            block("The proposed root overlaps another registered project: " + identifier)
+
+    if "initialize_after" in request and (blocks or migrated_spans):
+        block("initialize_after is only for the first project area, without existing managed or legacy-migration blocks.")
+    if additions:
+        if blocks:
+            insertion = max(item["end"] for item in blocks)
+        elif "initialize_after" in request:
+            anchor = request["initialize_after"]
+            span = exact_text_span(raw, anchor, literal_ranges)
+            if raw == b"" and anchor == "":
+                insertion = 0
+            elif span is None or not anchor.endswith("\n"):
+                block("initialize_after must identify unique exact complete text ending in a newline, outside code.")
+                insertion = None
+            else:
+                insertion = span[1]
+        elif migrated_spans:
+            block("Migrate existing sections first; add new projects with a fresh subsequent plan.")
+            insertion = None
+        else:
+            block("No managed project area exists. Bind exact legacy sections with before, or explicitly initialize a verified empty registry with initialize_after.")
+            insertion = None
+        if insertion is not None:
+            prefix = newline.encode("utf-8") if insertion and raw[insertion - 1:insertion] == b"\n" else (newline * 2).encode("utf-8") if insertion else b""
+            edits.append((insertion, insertion, prefix + newline.encode("utf-8").join(additions)))
+    elif "initialize_after" in request:
+        block("initialize_after requires new, unmanaged project records.")
+
+    result = raw
+    if not blockers:
+        for start, end, replacement in sorted(edits, reverse=True):
+            result = result[:start] + replacement + result[end:]
+    guard.check()
+    changed = result != raw
+    item = {"path": "PROJECT_RULES.md", "absolute_path": str(guard.path / "PROJECT_RULES.md"), "before": before,
+            "action": "replace" if changed else "keep", "content": result.decode("utf-8") if changed else "",
+            "after_sha256": digest(result)}
+    # Full context keeps every unchanged project and manual paragraph reviewable.
+    diff = "".join(difflib.unified_diff(original.splitlines(keepends=True), result.decode("utf-8").splitlines(keepends=True),
+                                      fromfile="PROJECT_RULES.md (before)", tofile="PROJECT_RULES.md (after)",
+                                      n=max(len(original.splitlines()), len(result.splitlines())))) if changed else ""
+    plan = {"tool": TOOL, "schema_version": 3, "operation": "update-projects", "root": str(guard.path),
+            "root_identity": list(identity(guard.path.lstat())), "request": request, "files": [item],
+            "diff": diff, "blockers": blockers, "ready_to_apply": not blockers}
+    plan["plan_digest"] = plan_digest(plan)
+    return plan
+
+
 @contextmanager
 def exclusive_file(fd, size):
     """Use a temporary OS lock on the existing file; no lock/config files."""
@@ -360,17 +659,34 @@ def load_layout(value):
         fail("invalid_layout", "Layout must be valid JSON describing the selected structure.")
 
 
+def load_projects(value):
+    source = sys.stdin.read() if value == "-" else Path(value).read_text(encoding="utf-8-sig")
+    def unique_keys(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                fail("invalid_projects", "Project JSON must not repeat an object key: " + key)
+            result[key] = item
+        return result
+    try:
+        return json.loads(source, object_pairs_hook=unique_keys)
+    except (ValueError, RecursionError):
+        fail("invalid_projects", "Projects must be valid JSON describing explicit confirmed records.")
+
+
 def apply_plan(root, plan, confirmed, started):
     if not re.fullmatch(r"[0-9a-f]{64}", confirmed) or plan.get("plan_digest") != confirmed or plan_digest(plan) != confirmed:
         fail("confirmation_mismatch", "The confirmed digest must match the unchanged displayed plan.")
-    if plan.get("tool") != TOOL or plan.get("schema_version") != 2:
+    if plan.get("tool") != TOOL or plan.get("schema_version") not in (2, 3):
         fail("invalid_plan", "Unsupported project rules plan.")
-    current = make_plan(root, plan.get("config"), plan.get("layout"))
+    current = make_update_plan(root, plan.get("request")) if plan["schema_version"] == 3 else make_plan(root, plan.get("config"), plan.get("layout"))
     if current != plan:
         fail("plan_changed", "The root, existing files, templates, or plan changed; stop affected writes and present the updated plan in the final reply for text feedback.")
     if plan["blockers"]:
         fail("manual_merge_required", "Existing rules need an assistant-reviewed merge diff in the plan before a user-requested edit; this automatic plan will not write any files.")
     guard = RootGuard(root)
+    if list(identity(guard.path.lstat())) != plan["root_identity"]:
+        fail("root_changed", "The project root changed before writing.")
     completed = []
     for item in plan["files"]:
         name = item["path"]
@@ -402,9 +718,12 @@ def apply_plan(root, plan, confirmed, started):
                         current_info = guard.item(name, "file")
                         if current_info is None or identity(current_info) != identity(info) or info.st_nlink != 1 or info.st_mtime_ns != before["mtime_ns"] or digest(existing) != before["sha256"]:
                             fail("item_changed", "Rule document changed while acquiring the write lock: " + name)
-                        output.seek(0, os.SEEK_END)
+                        guard.check()
+                        output.seek(0, os.SEEK_SET if item["action"] == "replace" else os.SEEK_END)
                         started.append(name)
                         output.write(data)
+                        if item["action"] == "replace":
+                            output.truncate()
                         output.flush()
                         os.fsync(output.fileno())
             finally:
@@ -425,6 +744,9 @@ def main():
     planning.add_argument("--name")
     planning.add_argument("--timezone", required=True, help="Explicit timezone label from the project rules or known session context; stored as metadata, not resolved against a timezone database.")
     planning.add_argument("--layout-file", help="Selected layout JSON file, or - for stdin. Required when PROJECT_RULES.md does not exist.")
+    updating = commands.add_parser("update-plan", help="Print a read-only incremental project registry plan, preserving all unowned bytes.")
+    updating.add_argument("root")
+    updating.add_argument("--projects-file", required=True, help="Explicit confirmed project records JSON file, or - for stdin.")
     applying = commands.add_parser("apply", help="Apply the exact plan on an explicit user operation request; do not ask again.")
     applying.add_argument("root")
     applying.add_argument("--plan-file", required=True, help="JSON plan file, or - to read stdin without a project cache.")
@@ -434,6 +756,8 @@ def main():
     try:
         if args.command == "plan":
             result = make_plan(args.root, {"name": args.name or Path(os.path.abspath(args.root)).name, "timezone": args.timezone, "language": args.language}, load_layout(args.layout_file) if args.layout_file else None)
+        elif args.command == "update-plan":
+            result = make_update_plan(args.root, load_projects(args.projects_file))
         else:
             result = apply_plan(args.root, load_plan(args.plan_file), args.confirmed_plan_digest, started)
         print(json.dumps(result, ensure_ascii=True, indent=2))

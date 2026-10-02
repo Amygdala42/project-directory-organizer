@@ -270,8 +270,63 @@ class RulesTests(unittest.TestCase):
         self.assertIn("工具固定文件名、产物结构和被引用的稳定资源沿用原约定", archive)
         self.assertIn("已有归档结构沿用", archive)
         self.assertIn("沿用已有命名与版本约定", archive)
-        self.assertIn("新建且无约定时采用", archive)
-        self.assertIn("同次 PPT/PDF 使用相同主名和版本", archive)
+        self.assertNotIn("YYYYMMDD", archive)
+        self.assertNotIn("v01", archive)
+
+    def test_output_selection_does_not_enable_date_version_or_ascii_naming_defaults(self):
+        for name in TEMPLATES:
+            shutil.copyfile(SOURCE / "assets/templates" / name, self.bundle / "assets/templates" / name)
+        for language in ("chinese", "english"):
+            plan = self.call("plan", self.root, "--language", language)
+            self.assertEqual(plan["layout"], LAYOUT)
+            text = next(item["content"] for item in plan["files"] if item["path"] == "PROJECT_RULES.md")
+            self.assertNotIn("YYYYMMDD", text)
+            self.assertNotIn("v01", text)
+            self.assertNotIn("ASCII", text)
+
+    def test_confirmed_rules_render_safely_apply_and_repeat_without_extra_files(self):
+        for name in TEMPLATES:
+            shutil.copyfile(SOURCE / "assets/templates" / name, self.bundle / "assets/templates" / name)
+        rules = ["Exports use ApprovalDate and Revision A; no date folders.", "Keep [PDF](reports/final.pdf) & <draft> beside the source."]
+        layout = dict(LAYOUT, rules=rules)
+        plan = self.call("plan", self.root, "--language", "english", layout=layout)
+        self.assertEqual(plan["schema_version"], 2)
+        self.assertEqual(plan["layout"]["rules"], rules)
+        self.apply(plan)
+        text = (self.root / "PROJECT_RULES.md").read_text(encoding="utf-8")
+        self.assertIn("- Exports use ApprovalDate and Revision A; no date folders.", text)
+        self.assertIn("- Keep \\[PDF\\]\\(reports/final.pdf\\) &amp; &lt;draft&gt; beside the source.", text)
+        self.assertNotIn("{{", text)
+        before = self.snapshot()
+        repeated = self.call("plan", self.root, "--language", "english", layout=layout)
+        self.assertEqual({item["action"] for item in repeated["files"]}, {"keep"})
+        self.apply(repeated)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(set(before), {"AGENTS.md", "PROJECT_RULES.md"})
+
+    def test_selected_rules_never_replace_existing_manual_document(self):
+        original = b"\xef\xbb\xbf# Team decisions\r\nExports stay with source files.\r\n"
+        (self.root / "PROJECT_RULES.md").write_bytes(original)
+        plan = self.call("plan", self.root, "--language", "english", layout=dict(LAYOUT, rules=["Use revision letters."]))
+        self.assertEqual(next(item for item in plan["files"] if item["path"] == "PROJECT_RULES.md")["action"], "keep")
+        self.apply(plan)
+        self.assertEqual((self.root / "PROJECT_RULES.md").read_bytes(), original)
+
+    def test_optional_rules_reject_unsafe_or_unbounded_input_without_writing(self):
+        invalid = [None, "A rule", [True], [""], [" first"], ["line\nline"], ["x" * 1001], ["x"] * 501,
+                   ["<!-- project-directory-organizer:project:start -->"]]
+        for rules in invalid:
+            with self.subTest(rules=rules):
+                result = self.call("plan", self.root, "--language", "english", layout=dict(LAYOUT, rules=rules), success=False)
+                self.assertEqual(result["code"], "invalid_layout")
+                self.assertEqual(self.snapshot(), {})
+
+    def test_explicit_empty_rules_remains_valid_with_legacy_scope_alias(self):
+        layout = dict(LAYOUT, rules=[])
+        layout["research"] = layout.pop("scope")
+        plan = self.call("plan", self.root, "--language", "english", layout=layout)
+        self.assertEqual(plan["layout"], dict(LAYOUT, rules=[]))
+        self.apply(plan)
 
     def test_invalid_layouts_are_rejected_without_writing(self):
         invalid = []
@@ -380,12 +435,15 @@ class RulesTests(unittest.TestCase):
                 self.assertEqual(result["code"], "invalid_layout")
                 self.assertEqual(self.snapshot(), {})
 
-    def test_output_rules_preserve_batch_and_version_requirements_in_selected_language(self):
-        for language, batch, filename in (("english", "YYYYMMDD-purpose", "content-name_v01.ext"), ("chinese", "YYYYMMDD用途", "内容名_v01.ext")):
-            plan = self.call("plan", self.root, "--language", language)
+    def test_explicit_date_and_version_choices_are_preserved_in_both_languages(self):
+        for name in TEMPLATES:
+            shutil.copyfile(SOURCE / "assets/templates" / name, self.bundle / "assets/templates" / name)
+        for language, rule in (("english", "Export batches use YYYYMMDD-purpose and revisions start at v01."),
+                               ("chinese", "交付批次采用 YYYYMMDD用途，版本从 v01 递增。")):
+            plan = self.call("plan", self.root, "--language", language, layout=dict(LAYOUT, rules=[rule]))
             text = next(item["content"] for item in plan["files"] if item["path"] == "PROJECT_RULES.md")
-            for phrase in (batch, filename, "实际产出或明确预留", "不强制成对", "同日同一逻辑交付批次", "不同用途", "跨日连续", "不覆盖旧版本", "PPT/PDF", "不复制未变化", "不随日期移动"):
-                self.assertIn(phrase, text)
+            self.assertEqual(plan["layout"]["rules"], [rule])
+            self.assertIn("- " + rule, text)
 
     def test_custom_rules_encoding_and_unrelated_template_changes_do_not_trigger_merge(self):
         custom = "自定义规则，保留原始编码".encode("utf-16")

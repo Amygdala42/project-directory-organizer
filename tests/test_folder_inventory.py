@@ -6,6 +6,8 @@ writing caches, wrong totals, silent limits/errors, and invalid argument default
 from __future__ import annotations
 
 import ctypes
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import json
 import os
@@ -125,6 +127,7 @@ class InventoryTests(unittest.TestCase):
         before = {str(p.relative_to(self.case)): (p.read_bytes(), p.stat().st_mtime_ns)
                   for p in self.case.rglob("*") if p.is_file()}
         self.call(bytecode_flag=False)
+        self.call("--summary", bytecode_flag=False)
         after = {str(p.relative_to(self.case)): (p.read_bytes(), p.stat().st_mtime_ns)
                  for p in self.case.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
@@ -306,6 +309,157 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(set(self.items(report)), {"deep"})
         self.assertEqual(self.items(report)["deep"]["children_status"], "skipped_limit")
         self.assertFalse(report["complete"])
+
+    def summarize(self, report, top=10):
+        module = self.load_module()
+        render = getattr(module, "summarize", None)
+        self.assertTrue(callable(render), "Pure summary renderer is missing")
+        return render(report, top=top)
+
+    def test_summary_groups_direct_children_and_extensions_without_losing_equal_names(self):
+        self.file("alpha/deep/same.TXT", b"12345")
+        self.file("beta/same.txt", b"12345")
+        self.file("beta/archive.tar.gz", b"12")
+        self.file(".hidden", b"abc")
+        self.file("README", b"x")
+        report = self.call()
+        result = self.summarize(report, top=2)
+        self.assertNotIn("entries", result)
+        groups = {item["path"]: item for item in result["summary"]["by_top_level"]}
+        self.assertEqual(set(groups), {".", "alpha", "beta"})
+        self.assertEqual((groups["alpha"]["entries"], groups["alpha"]["files"],
+                          groups["alpha"]["directories"], groups["alpha"]["file_bytes"]), (3, 1, 2, 5))
+        self.assertEqual((groups["beta"]["files"], groups["beta"]["file_bytes"]), (2, 7))
+        self.assertEqual((groups["."]["files"], groups["."]["file_bytes"]), (2, 4))
+        extensions = {item["extension"]: (item["files"], item["file_bytes"])
+                      for item in result["summary"]["by_extension"]}
+        self.assertEqual(extensions, {".txt": (2, 10), ".gz": (1, 2), "": (2, 4)})
+        self.assertEqual([item["path"] for item in result["summary"]["largest_files"]],
+                         ["alpha/deep/same.TXT", "beta/same.txt"])
+        self.assertEqual(result["summary"]["top"], 2)
+
+    def test_summary_preserves_partial_status_hidden_and_generated_scope(self):
+        self.file(".hidden", b"abc")
+        self.file("node_modules/omitted.js", b"not counted")
+        self.file("nested/omitted.txt", b"also not counted")
+        report = self.call("--max-depth", 1)
+        result = self.summarize(report)
+        for key in report.keys() - {"entries", "summary"}:
+            self.assertEqual(result[key], report[key], key)
+        for key, value in report["summary"].items():
+            self.assertEqual(result["summary"][key], value, key)
+        self.assertFalse(result["complete"])
+        self.assertIsNone(result["summary"]["unlisted_entries"])
+        self.assertTrue(result["policy"]["include_hidden"])
+        self.assertFalse(result["policy"]["include_generated"])
+        self.assertEqual(result["summary"]["files"], 1)
+        self.assertEqual(result["summary"]["file_bytes"], 3)
+        self.assertEqual({item["reason"] for item in result["omissions"]},
+                         {"generated_directory", "max_depth"})
+
+    def test_summary_uses_finished_time_for_exact_age_boundaries_future_and_unknown(self):
+        report = self.call()
+        finished = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        report["finished_utc"] = "2026-10-01T00:00:00Z"
+        samples = [(-1, "future"), (0, "<7d"), (7 - 1 / 86400, "<7d"),
+                   (7, "7-30d"), (30 - 1 / 86400, "7-30d"), (30, "30-90d"),
+                   (90 - 1 / 86400, "30-90d"), (90, "90-365d"),
+                   (365 - 1 / 86400, "90-365d"), (365, ">=365d")]
+        report["entries"] = [
+            {"path": str(index) + ".txt", "type": "file", "depth": 1, "size_bytes": 2,
+             "modified_utc": (finished - timedelta(days=age)).isoformat()}
+            for index, (age, _) in enumerate(samples)
+        ]
+        for index, value in enumerate((None, "invalid", "2026-09-30T00:00:00")):
+            report["entries"].append({"path": "unknown-" + str(index), "type": "file",
+                                      "depth": 1, "size_bytes": 3, "modified_utc": value})
+        report["summary"].update(entries=13, files=13, file_bytes=29)
+        result = self.summarize(report)
+        buckets = {item["age"]: (item["files"], item["file_bytes"])
+                   for item in result["summary"]["by_modified_age"]}
+        self.assertEqual(buckets, {"<7d": (2, 4), "7-30d": (2, 4), "30-90d": (2, 4),
+                                   "90-365d": (2, 4), ">=365d": (1, 2),
+                                   "future": (1, 2), "unknown": (3, 9)})
+        self.assertEqual(result["summary"]["reference_utc"], report["finished_utc"])
+
+    def test_summary_recent_files_sort_by_instant_and_exclude_future_unknown(self):
+        report = self.call()
+        report["finished_utc"] = "2026-10-01T00:00:00Z"
+        samples = [("a/old.txt", "2026-09-30T02:00:00+02:00"),
+                   ("z/new.txt", "2026-09-30T01:00:00Z"),
+                   ("future.txt", "2026-10-02T00:00:00Z"), ("unknown.txt", None)]
+        report["entries"] = [{"path": path, "type": "file", "depth": 2,
+                              "size_bytes": 1, "modified_utc": modified} for path, modified in samples]
+        report["summary"].update(entries=4, files=4, file_bytes=4)
+        result = self.summarize(report)
+        self.assertEqual([item["path"] for item in result["summary"]["recently_modified_files"]],
+                         ["z/new.txt", "a/old.txt"])
+
+    def test_summary_is_pure_metadata_rendering_after_source_tree_is_removed(self):
+        self.file("a/same.bin", b"identical")
+        self.file("b/same.bin", b"identical")
+        report = self.call()
+        before = deepcopy(report)
+        # The renderer must work without the original tree or any accessible body.
+        for target in sorted(self.root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+            if target.is_file():
+                target.unlink()
+            else:
+                target.rmdir()
+        self.root.rmdir()
+        module = self.load_module()
+        self.assertTrue(callable(getattr(module, "summarize", None)), "Pure summary renderer is missing")
+        with patch.object(module.os, "scandir", side_effect=AssertionError("Unexpected second traversal")), \
+                patch("builtins.open", side_effect=AssertionError("Unexpected content or cache access")):
+            result = module.summarize(report)
+        self.assertEqual(report, before)
+        self.assertEqual(result["summary"]["files"], 2)
+        self.assertEqual(len(result["summary"]["largest_files"]), 2)
+
+    def test_summary_cli_default_compatibility_zero_files_and_top_limit(self):
+        empty = self.call("--summary")
+        self.assertNotIn("entries", empty)
+        self.assertEqual(empty["summary"]["files"], 0)
+        self.assertEqual(empty["summary"]["by_top_level"], [])
+        self.assertEqual(empty["summary"]["by_extension"], [])
+        self.assertEqual(empty["summary"]["largest_files"], [])
+        self.assertEqual(empty["summary"]["recently_modified_files"], [])
+        self.assertEqual(sum(item["files"] for item in empty["summary"]["by_modified_age"]), 0)
+        for index in range(12):
+            self.file("file-" + str(index) + ".bin", b"x" * (index + 1))
+        default = self.call()
+        self.assertIn("entries", default)
+        self.assertNotIn("by_top_level", default["summary"])
+        unchanged = self.call("--top", 1)
+        self.assertEqual(unchanged["summary"], default["summary"])
+        result = self.call("--summary")
+        self.assertEqual(len(result["summary"]["largest_files"]), 10)
+        self.assertEqual(len(result["summary"]["recently_modified_files"]), 10)
+        limited = self.call("--summary", "--top", 1)
+        self.assertEqual([item["path"] for item in limited["summary"]["largest_files"]], ["file-11.bin"])
+        self.assertEqual(limited["summary"]["files"], 12)
+
+    def test_summary_cli_and_api_reject_non_positive_or_non_integer_top(self):
+        for value in ("0", "-1", "many", "1.5"):
+            with self.subTest(cli=value):
+                result = self.call("--summary", "--top", value, success=False)
+                self.assertEqual(result["code"], "arguments")
+        module = self.load_module()
+        self.assertTrue(callable(getattr(module, "summarize", None)), "Pure summary renderer is missing")
+        report = self.call()
+        for value in (0, -1, True, 1.5, "2", None):
+            with self.subTest(api=value), self.assertRaises(module.OperationError) as error:
+                module.summarize(report, top=value)
+            self.assertEqual(error.exception.code, "arguments")
+
+    def test_summary_entry_limit_remains_partial_without_opening_subtrees(self):
+        self.file("deep/child/file.bin")
+        result = self.call("--summary", "--max-entries", 1)
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["summary"]["entries"], 1)
+        self.assertEqual(result["summary"]["files"], 0)
+        self.assertEqual(result["limits"]["max_entries"], 1)
+        self.assertEqual(result["omissions"], [{"path": ".", "reason": "max_entries", "unlisted_entries": None}])
 
 
 if __name__ == "__main__":

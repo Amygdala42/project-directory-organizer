@@ -1,4 +1,4 @@
 interface:
   display_name: "Project Directory Organizer"
-  short_description: "Plan project folders and organize on request"
-  default_prompt: "使用 $project-directory-organizer，先用简短弹窗获取必要信息，再在正式回复中给出完整目录计划并结束；展示计划时不弹窗，我会打字反馈。"
+  short_description: "Plan folders and classify files by task"
+  default_prompt: "使用 $project-directory-organizer：新建或调整框架时逐项确认需求，给出完整可删减方案等我反馈；已有框架内创建文件时先按项目规则分类。"

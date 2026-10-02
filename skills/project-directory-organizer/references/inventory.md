@@ -10,6 +10,8 @@
 python -B folder_inventory.py ROOT
 python -B folder_inventory.py ROOT --max-depth 3 --max-entries 10000
 python -B folder_inventory.py ROOT --include-generated
+python -B folder_inventory.py ROOT --summary
+python -B folder_inventory.py ROOT --summary --top 5 --max-depth 3
 ```
 
 助手位于`../scripts/folder_inventory.py`，使用现有Python 3.9+标准库。命令中的ROOT和脚本应替换为实际已核对路径，按shell规则引用，不拼接执行用户文件名里的命令。
@@ -21,6 +23,25 @@ python -B folder_inventory.py ROOT --include-generated
 - 无权限或扫描中消失的路径记录错误；条目或深度上限引起的未扫描区域也需记录。读取失败不等于空目录。
 - 清单包含相对路径、类型、大小与修改时间等元数据，不读取正文、不解压、不运行程序，也不在目标中写报告或缓存。
 - `complete:false`表示有遗漏或错误。总数和字节数只统计实际列出的条目；不是全盘统计，不是磁盘实际占用，也不是同一时刻的文件系统快照。
+
+### 只读摘要
+
+需要先了解规模、主要子目录、类型和近期修改情况时使用`--summary`。默认命令仍输出原有JSON格式；摘要视图只去掉顶层`entries`详细清单，在原`summary`总数上追加以下字段。根目录、扫描起止时间、`complete`、`root_children_status`、`omissions`、`errors`、`limits`和`policy`全部保留，不能把摘要当成完整扫描的证明。
+
+| 字段 | 含义 |
+| --- | --- |
+| `by_top_level` | 按根的直接子目录汇总已列条目的数量、类型数量和普通文件逻辑字节；目录入口本身计入该组，根直属的非目录条目放在路径`.`组。不是自动识别项目用途或项目边界。 |
+| `by_extension` | 普通文件按最后一个扩展名汇总文件数和逻辑字节；扩展名大小写合并，`.tar.gz`记为`.gz`，无扩展名用空字符串，包括单独的`.hidden`名称。 |
+| `by_modified_age` | 按修改时间分为`<7d`、`7-30d`、`30-90d`、`90-365d`、`>=365d`、`future`和`unknown`，每组保留文件数与逻辑字节，空组也列出。 |
+| `largest_files` | 按逻辑字节降序列出最大文件，保留从扫描根开始的完整相对路径、大小和修改时间；同大小按路径稳定排序，不哈希、不判定重复文件。 |
+| `recently_modified_files` | 按实际修改时间从新到旧列出文件，不按文件名字母排序；相同时刻按路径排序。未来时间和未知时间不进入此榜单，分别计入`future`、`unknown`。 |
+| `reference_utc`、`top` | 时间区间的参照时刻与每个文件榜单的条数上限。 |
+
+所有时间区间以本次扫描的`finished_utc`为参照，一天按24小时计；恰好7、30、90、365天分别归入下一档。未来修改时间单列，不当作最新修改。缺失、无效或没有时区的时间记为未知；若输入报告缺少有效的扫描结束时间，所有文件的年龄均为未知，`reference_utc`为`null`。修改时间仍不是创建时间或任务起始时间。
+
+`--top N`必须为正整数，默认10，只控制两个文件榜单，不截断分类汇总、不改变扫描范围；单独使用`--top`不改变默认完整清单。分类汇总按逻辑字节降序、名称升序排列。默认包含隐藏条目、跳过常见生成目录内部、跳过链接目标的规则不变，具体范围由保留的`policy`和遗漏列表说明。深度或条目上限、访问错误造成的部分扫描，也只汇总已列条目，不推算未扫描总量。
+
+脚本提供`summarize(report, top=10)`纯渲染函数：只使用已经扫描的元数据，不修改传入报告、不再次遍历、不读取文件内容，也不写报告或缓存。它返回新的摘要视图；逻辑字节是每个已列普通文件的长度之和，未去重，也不代表可释放空间或可删除性。
 
 ## 2. 核实用途
 
