@@ -1,6 +1,6 @@
 # Project Directory Organizer
 
-版本：**v1.2.0** · [本版更新](docs/releases/v1.2.0.md)
+版本：**v1.3.0** · [本版更新](docs/releases/v1.3.0.md)
 
 为 Codex 提供项目目录规划、文件风险检查与整理、成果归档、只读盘点及精确删除恢复功能。支持中文或英文业务目录，结构按当前项目和任务选择，不预设行业、学科或完整目录套件。
 
@@ -26,6 +26,8 @@ $project-directory-organizer 主目录是 D:\Projects\my-project，用于说明�
 
 [完整使用说明](docs/usage.md) · [技能入口](skills/project-directory-organizer/SKILL.md) · [目录示例](skills/project-directory-organizer/references/examples.md)
 
+v1.3.0 将新建且可自由定位的独立环境统一放在已确认主目录的 `env/<项目标识>/`，先按项目区分，再按实际需要细分环境。是否需要独立环境仍单独确认；不需要时不建占位目录。集中存放不代表共享，已有环境与工具固定位置保留并记录。登记和只读核对均支持集中环境归属，成果位置仍限定所属项目。详见[环境规则](skills/project-directory-organizer/references/directory-reference.md#2-主项目环境与工具结构)。
+
 v1.2.0 保留必要的逐项提问，推荐可删减的完整框架，按任务决定分类与名称。每次新建、复制、下载或导出文件前，先确定项目归属、用途与状态、文件关联、位置和名称；已有规则足够时直接完成已授权任务，缺项才补充确认。生成的项目规则不再默认套用日期批次、v01或英文连字符格式，已确认的具体约定可随布局记录。
 
 v1.1.0 已提供四项能力：盘点摘要（按直接子目录、扩展名、修改时间分组及文件榜单）、已确认规则的只读核对、已有项目登记的受保护局部更新，以及可裁剪的内容创作/交付/资料库范例。只读检查不会创建计划文件或修复偏差；规则更新继续通过计划、摘要和写前状态检查，保护手写条款与其他项目。
@@ -45,14 +47,20 @@ v1.1.0 已提供四项能力：盘点摘要（按直接子目录、扩展名、�
 ├─ README.md
 ├─ VERSION
 ├─ .gitignore
+├─ AGENTS.md
+├─ PROJECT_RULES.md
 ├─ docs/
 │  ├─ usage.md
-│  └─ releases/
-│     ├─ v1.0.1.md
-│     ├─ v1.0.3.md
-│     ├─ v1.0.4.md
-│     ├─ v1.1.0.md
-│     └─ v1.2.0.md
+│  ├─ releases/
+│  │  ├─ v1.0.1.md
+│  │  ├─ v1.0.3.md
+│  │  ├─ v1.0.4.md
+│  │  ├─ v1.1.0.md
+│  │  ├─ v1.2.0.md
+│  │  └─ v1.3.0.md
+│  └─ superpowers/
+│     └─ plans/
+│        └─ 2026-10-01-v1.1.0.md
 ├─ skills/
 │  └─ project-directory-organizer/
 │     ├─ SKILL.md
@@ -65,6 +73,10 @@ v1.1.0 已提供四项能力：盘点摘要（按直接子目录、扩展名、�
 
 `skills/project-directory-organizer/` 是完整可安装技能；`tests/` 是独立开发测试。
 
+维护本仓库时，从根目录的 [AGENTS.md](AGENTS.md) 读取 [PROJECT_RULES.md](PROJECT_RULES.md)。这两份规则只用于维护本仓库；技能包内的 `assets/templates/` 是为目标项目生成规则的模板，不是本仓库的生效规则。
+
+[v1.1.0 开发计划](docs/superpowers/plans/2026-10-01-v1.1.0.md) 保留已完成的实施过程与设计约束；当前使用方式见使用说明，各版本变更和验证结果见发布说明。
+
 ## 验证
 
 交互规则改动还需按[多轮交互回归场景](tests/interaction-scenarios.md)检查提问、计划和执行的衔接；脚本单元测试不验证对话是否会跳步。
@@ -75,4 +87,4 @@ v1.1.0 已提供四项能力：盘点摘要（按直接子目录、扩展名、�
 python -B -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-测试夹具写入系统临时目录下的 `project-directory-organizer-tests/`，不写入仓库或实际项目目录。夹具为复核失败保留，不会自动清除；请勿将这些运行产物上传到仓库。
+测试夹具写入系统临时目录，不写入仓库或实际项目目录。多数夹具位于 `project-directory-organizer-tests/`，为复核失败保留，不会自动清除；增量项目登记测试使用独立的 `registry-tests-*` 临时目录，并在测试结束时自动清理。请勿将这些运行产物上传到仓库。

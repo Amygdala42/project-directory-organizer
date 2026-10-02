@@ -18,7 +18,7 @@ ROOT 必须是明确的现有根；`-` 从标准输入读取，不保存配置�
   "schema_version": 1,
   "paths": [
     {"path": "code", "kind": "directory", "state": "present"},
-    {"path": "env", "kind": "directory", "state": "planned"}
+    {"path": "env/toolkit", "kind": "directory", "state": "planned"}
   ],
   "links": [
     {"source": "AGENTS.md", "target": "PROJECT_RULES.md"}
@@ -29,7 +29,7 @@ ROOT 必须是明确的现有根；`-` 从标准输入读取，不保存配置�
 }
 ```
 
-此示例仅展示字段。项目没选环境、报告或这套命名时，删除相应检查项；不能为满足示例而补建目录。
+此示例仅展示字段，toolkit指已确认的主项目标识。项目没选环境、报告或这套命名时，删除相应检查项；不能为满足示例而补建目录。
 
 | 组 | 字段与语义 |
 | --- | --- |
@@ -53,7 +53,9 @@ ROOT 必须是明确的现有根；`-` 从标准输入读取，不保存配置�
 }
 ```
 
-`status` 可为 `planned`、`active`、`archived`。后两者核对原登记位置仍存在，不自动搬迁或推测归档后的地址；归档涉及位置变化时先更新登记。`planned` 项目的根、环境和成果目录都可尚未存在。`environment` 是 `null` 或根内相对目录路径；`outputs` 是根内相对目录列表，均须属于当前项目根。跨项目共享需另行人工核对明确共享约定，不能因为位于主根就通过归属检查。字段中的“根”均指命令行 ROOT，不能混用子根基准。
+`status` 可为 `planned`、`active`、`archived`。后两者核对原登记位置仍存在，不自动搬迁或推测归档后的地址；归档涉及位置变化时先更新登记。`planned` 项目的根、环境和成果目录都可尚未存在。`environment` 为null、`env/<id>`或其后代，也兼容严格位于本项目根内的旧环境路径；`outputs` 仍须严格位于本项目根内。环境不能与成果重叠或互相包含，各项目环境不能重叠或侵入其他项目根。字段路径均相对命令行ROOT，不混用子根基准；例如path为apps/crawler、id为crawler时，environment可为env/crawler。
+
+路径校验不能判定为何采用旧环境位置、是否需要环境或能否共享，相关业务理由和工具限制仍人工核实。集中不等于共享，共享资源另行核对明确使用方；规则核对不将旧环境迁入env，也不把兼容旧路径当作新布局建议。
 
 ## 结果与边界
 

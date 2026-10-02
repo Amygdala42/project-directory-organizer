@@ -162,6 +162,161 @@ class VerifyTests(unittest.TestCase):
         report = self.call(self.policy(projects=[project]))
         self.assertEqual(report['summary']['deviation'], 0)
 
+    def test_central_environment_uses_id_and_preserves_existing_local_environment(self):
+        for environment in ('env/crawler', 'env/crawler/python'):
+            with self.subTest(environment=environment):
+                for path in ('apps/crawler/reports', environment, 'legacy/.venv'):
+                    (self.root / path).mkdir(parents=True, exist_ok=True)
+                base = {'purpose': 'code', 'status': 'active', 'language': 'english', 'rules': []}
+                projects = [dict(base, id='crawler', path='apps/crawler', environment=environment,
+                                 outputs=['apps/crawler/reports']),
+                            dict(base, id='legacy', path='legacy', environment='legacy/.venv', outputs=[])]
+                before = {str(p.relative_to(self.case)): p.read_bytes() if p.is_file() else None
+                          for p in self.case.rglob('*')}
+                report = self.call(self.policy(projects=projects), '--strict', code=1)
+                after = {str(p.relative_to(self.case)): p.read_bytes() if p.is_file() else None
+                         for p in self.case.rglob('*')}
+                self.assertEqual(before, after)
+                self.assertEqual(report['summary']['deviation'], 0, report['checks'])
+                self.assertFalse(report['compliant'])
+                unverified = [c['path'] for c in report['checks']
+                              if c['code'] == 'environment_installation_unverified']
+                self.assertEqual(unverified, [environment, 'legacy/.venv'])
+                self.assertTrue(all(c['status'] == 'unverified' for c in report['checks']
+                                    if c['code'] == 'environment_installation_unverified'))
+
+    def test_planned_central_environment_is_not_missing(self):
+        project = {'id': 'crawler', 'path': 'apps/crawler', 'purpose': 'code', 'status': 'planned',
+                   'language': 'english', 'environment': 'env/crawler/python',
+                   'outputs': ['apps/crawler/reports'], 'rules': []}
+        report = self.call(self.policy(projects=[project]))
+        self.assertEqual(report['summary']['deviation'], 0, report['checks'])
+        self.assertEqual([c['path'] for c in report['checks'] if c['code'] == 'planned_absent'],
+                         ['apps/crawler', 'env/crawler/python', 'apps/crawler/reports'])
+
+    def test_central_environment_cannot_claim_other_id_or_prefix_sibling(self):
+        base = {'id': 'crawler', 'path': 'apps/crawler', 'purpose': 'code', 'status': 'planned',
+                'language': 'english', 'outputs': [], 'rules': []}
+        for environment in ('env', 'env/beta', 'env/beta/python', 'env/crawler2', 'other/env/crawler'):
+            with self.subTest(environment=environment):
+                report = self.call(self.policy(projects=[dict(base, environment=environment)]))
+                self.assertEqual([c['path'] for c in report['checks'] if c['code'] == 'ownership_mismatch'],
+                                 [environment])
+
+    def test_central_environment_exception_does_not_allow_central_outputs(self):
+        base = {'id': 'crawler', 'path': 'apps/crawler', 'purpose': 'code', 'status': 'planned',
+                'language': 'english', 'environment': 'env/crawler', 'rules': []}
+        for output in ('env/crawler/reports', 'env/reports', 'apps/beta/reports'):
+            with self.subTest(output=output):
+                report = self.call(self.policy(projects=[dict(base, outputs=[output])]))
+                self.assertEqual([c['path'] for c in report['checks'] if c['code'] == 'ownership_mismatch'],
+                                 [output])
+
+    def test_central_environment_cannot_overlap_another_project_root(self):
+        base = {'purpose': 'code', 'status': 'planned', 'language': 'english', 'outputs': [], 'rules': []}
+        for root in ('env', 'env/crawler', 'env/crawler/nested'):
+            with self.subTest(root=root):
+                projects = [dict(base, id='crawler', path='apps/crawler', environment='env/crawler'),
+                            dict(base, id='beta', path=root, environment=None)]
+                report = self.call(self.policy(projects=projects))
+                self.assertTrue(any(c['code'] == 'ownership_mismatch' and c['path'] == 'env/crawler'
+                                    for c in report['checks']), report['checks'])
+
+    def test_central_environment_reports_shared_or_containing_environment(self):
+        base = {'purpose': 'code', 'status': 'planned', 'language': 'english', 'outputs': [], 'rules': []}
+        for environment in ('env/crawler', 'env/crawler/python', 'env'):
+            with self.subTest(environment=environment):
+                projects = [dict(base, id='crawler', path='apps/crawler', environment='env/crawler'),
+                            dict(base, id='beta', path='apps/beta', environment=environment)]
+                report = self.call(self.policy(projects=projects))
+                self.assertTrue(any(c['code'] == 'environment_overlap' and c['path'] == 'env/crawler'
+                                    for c in report['checks']), report['checks'])
+
+    def test_central_environment_cannot_overlap_another_project_output(self):
+        base = {'purpose': 'code', 'status': 'planned', 'language': 'english', 'rules': []}
+        for output in ('env/crawler', 'env/crawler/reports', 'env'):
+            with self.subTest(output=output):
+                projects = [dict(base, id='crawler', path='apps/crawler', environment='env/crawler', outputs=[]),
+                            dict(base, id='beta', path='apps/beta', environment=None, outputs=[output])]
+                report = self.call(self.policy(projects=projects))
+                self.assertTrue(any(c['code'] == 'environment_overlap' and c['path'] == 'env/crawler'
+                                    for c in report['checks']), report['checks'])
+
+    def test_local_environment_cannot_contain_another_project_root(self):
+        base = {'purpose': 'code', 'status': 'planned', 'language': 'english', 'outputs': [], 'rules': []}
+        projects = [dict(base, id='alpha', path='alpha', environment='alpha/env'),
+                    dict(base, id='beta', path='alpha/env/beta', environment=None)]
+        report = self.call(self.policy(projects=projects))
+        self.assertTrue(any(c['code'] == 'ownership_mismatch' and c['path'] == 'alpha/env'
+                            for c in report['checks']), report['checks'])
+
+    def test_environment_ownership_matches_registry_case_and_unicode_keys(self):
+        base = {'id': 'crawler', 'purpose': 'code', 'status': 'planned', 'language': 'english',
+                'outputs': [], 'rules': []}
+        for root, environment in (('apps/crawler', 'ENV/Crawler/python'),
+                                  ('apps/caf\u00e9', 'APPS/cafe\u0301/python')):
+            with self.subTest(root=root, environment=environment):
+                report = self.call(self.policy(projects=[dict(base, path=root, environment=environment)]))
+                self.assertEqual(report['summary']['deviation'], 0, report['checks'])
+
+    def test_environment_conflicts_match_registry_case_and_unicode_keys(self):
+        base = {'purpose': 'code', 'status': 'planned', 'language': 'english', 'outputs': [], 'rules': []}
+        projects = [dict(base, id='crawler', path='apps/crawler', environment='env/crawler/caf\u00e9'),
+                    dict(base, id='beta', path='ENV/Crawler/cafe\u0301/nested', environment=None)]
+        report = self.call(self.policy(projects=projects))
+        self.assertTrue(any(c['code'] == 'ownership_mismatch' and c['path'] == 'env/crawler/caf\u00e9'
+                            for c in report['checks']), report['checks'])
+
+    def test_environment_cannot_be_or_contain_its_own_project_root(self):
+        base = {'id': 'crawler', 'purpose': 'code', 'status': 'planned', 'language': 'english',
+                'outputs': [], 'rules': []}
+        for root, environment in (('apps/crawler', 'apps/crawler'),
+                                  ('env/crawler', 'env/crawler'),
+                                  ('env/crawler/work', 'env/crawler')):
+            with self.subTest(root=root, environment=environment):
+                report = self.call(self.policy(projects=[dict(base, path=root, environment=environment)]))
+                self.assertEqual([c['path'] for c in report['checks'] if c['code'] == 'ownership_mismatch'],
+                                 [environment])
+
+    def test_local_environment_cannot_overlap_its_own_outputs(self):
+        base = {'id': 'crawler', 'path': 'apps/crawler', 'purpose': 'code', 'status': 'planned',
+                'language': 'english', 'environment': 'apps/crawler/env', 'rules': []}
+        for output in ('apps/crawler/env', 'apps/crawler/env/reports', 'apps/crawler'):
+            with self.subTest(output=output):
+                report = self.call(self.policy(projects=[dict(base, outputs=[output])]))
+                self.assertTrue(any(c['code'] == 'environment_overlap' and c['path'] == 'apps/crawler/env'
+                                    for c in report['checks']), report['checks'])
+
+    def test_nested_local_environment_keeps_ownership_under_central_named_root(self):
+        base = {'purpose': 'code', 'status': 'planned', 'language': 'english', 'outputs': [], 'rules': []}
+        projects = [dict(base, id='outer', path='env', environment=None),
+                    dict(base, id='child', path='env/child', environment='env/child/.venv')]
+        for ordered in (projects, projects[::-1]):
+            with self.subTest(order=[p['id'] for p in ordered]):
+                report = self.call(self.policy(projects=ordered))
+                self.assertEqual(report['summary']['deviation'], 0, report['checks'])
+                self.assertTrue(any(c['code'] == 'planned_absent' and c['path'] == 'env/child/.venv'
+                                    for c in report['checks']))
+
+    def test_project_root_aliases_are_rejected_before_ownership_checks(self):
+        base = {'purpose': 'code', 'status': 'planned', 'language': 'english',
+                'environment': None, 'outputs': [], 'rules': []}
+        projects = [dict(base, id='alpha', path='apps/caf\u00e9'),
+                    dict(base, id='beta', path='APPS/cafe\u0301')]
+        for ordered in (projects, projects[::-1]):
+            with self.subTest(order=[p['id'] for p in ordered]):
+                report = self.call(self.policy(projects=ordered), code=2)
+                self.assertEqual(report['code'], 'invalid_policy')
+
+    def test_output_cannot_equal_its_own_project_root(self):
+        base = {'id': 'crawler', 'purpose': 'code', 'status': 'planned', 'language': 'english',
+                'environment': None, 'rules': []}
+        for root, output in (('apps/crawler', 'apps/crawler'), ('apps/caf\u00e9', 'APPS/cafe\u0301')):
+            with self.subTest(root=root, output=output):
+                report = self.call(self.policy(projects=[dict(base, path=root, outputs=[output])]))
+                self.assertEqual([c['path'] for c in report['checks'] if c['code'] == 'ownership_mismatch'],
+                                 [output])
+
     def test_registry_project_identifiers_are_accepted_and_case_unique(self):
         project = {'id': 'QQ_2', 'path': 'QQ', 'purpose': 'reference', 'status': 'planned',
                    'language': 'chinese', 'environment': None, 'outputs': [], 'rules': []}

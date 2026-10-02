@@ -58,6 +58,20 @@ def inside(path, parent):
     return key(path) == key(parent) or key(path).startswith(key(parent) + '/')
 
 
+def project_key(path):
+    """Match registry ownership without changing filesystem lookup semantics."""
+    return unicodedata.normalize('NFC', path).casefold()
+
+
+def project_inside(path, parent):
+    path, parent = project_key(path), project_key(parent)
+    return path == parent or path.startswith(parent + '/')
+
+
+def project_overlap(first, second):
+    return project_inside(first, second) or project_inside(second, first)
+
+
 def records(value, label):
     if not isinstance(value, list) or len(value) > 1000:
         fail('invalid_policy', label + ' must be a list of at most 1000 items.')
@@ -123,7 +137,7 @@ def validate_policy(policy):
                 fail('invalid_policy', 'Duplicate policy record.')
             seen.add(unique)
             normalized[group].append(record)
-    roots = [key(p['path']) for p in normalized['projects']]
+    roots = [project_key(p['path']) for p in normalized['projects']]
     if len(set(roots)) != len(roots):
         fail('invalid_policy', 'Different projects cannot claim the same root.')
     return normalized
@@ -272,12 +286,33 @@ def verify(root, policy, max_depth=None, max_entries=10000):
         path = project['path']
         planned = project['status'] == 'planned'
         path_check(path, 'directory', planned)
-        for name in ([project['environment']] if project['environment'] else []) + project['outputs']:
-            owners = [p for p in policy['projects'] if inside(name, p['path'])]
-            owner = max(owners, key=lambda p: len(p['path']), default=None)
-            if owner is None or owner['id'] != project['id']:
+        locations = ([(project['environment'], True)] if project['environment'] else [])
+        locations += [(name, False) for name in project['outputs']]
+        for name, environment in locations:
+            owners = [p for p in policy['projects'] if project_inside(name, p['path'])]
+            owner = max(owners, key=lambda p: len(project_key(p['path'])), default=None)
+            owned = (owner is not None and owner['id'] == project['id']
+                     and project_key(name) != project_key(path))
+            overlap = False
+            if environment:
+                central = not owned and project_inside(name, 'env/' + project['id'])
+                # Local environments retain most-specific ownership. Central
+                # environments must not intrude into any other project root.
+                root_conflict = any(
+                    project_inside(p['path'], name)
+                    or (central and p['id'] != project['id'] and project_inside(name, p['path']))
+                    for p in policy['projects'])
+                owned = (owned or central) and not root_conflict
+                overlap = any(
+                    project_overlap(name, other)
+                    for p in policy['projects']
+                    for other in p['outputs'] + ([p['environment']]
+                        if p['id'] != project['id'] and p['environment'] else []))
+            if not owned:
                 add('deviation', 'ownership_mismatch', name, 'This location belongs to a different or more specific project; shared ownership requires separate human review.')
-            else:
+            if overlap:
+                add('deviation', 'environment_overlap', name, 'An environment must not overlap another environment or an output location.')
+            if owned and not overlap:
                 path_check(name, 'directory', planned)
         if project['environment']:
             add('unverified', 'environment_installation_unverified', project['environment'], 'Folder presence does not prove installation or a working environment.')

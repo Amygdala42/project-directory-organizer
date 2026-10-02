@@ -328,6 +328,35 @@ def paths_overlap(first, second):
     return first == second or first.startswith(second + "/") or second.startswith(first + "/")
 
 
+def project_environment(value, identifier, path, guard):
+    if value is None:
+        return None
+    environment = relative_layout_path(value, guard, "environment")
+    central, key = path_key("env/" + identifier), path_key(environment)
+    if key == path_key(path) or path_key(path).startswith(key + "/"):
+        fail("invalid_projects", "An environment must not equal or contain its own project root.")
+    if not (key.startswith(path_key(path) + "/") or key == central or key.startswith(central + "/")):
+        fail("invalid_projects", "An environment must use env/<project id> or a descendant, or remain strictly inside its own project root.")
+    return environment
+
+
+def project_location_conflicts(records):
+    """Compare complete proposed ownership, including unchanged registrations."""
+    for index, first in enumerate(records):
+        for second in records[index + 1:]:
+            if paths_overlap(first["path"], second["path"]):
+                yield "Independent project roots must not overlap: " + first["id"] + " and " + second["id"]
+            for owner, other in ((first, second), (second, first)):
+                environment = owner["environment"]
+                # Outputs remain strictly inside their owner's root, so rejecting
+                # all root overlap also protects every output without decoding
+                # the older human-readable, semicolon-delimited Outputs row.
+                if environment is not None and paths_overlap(environment, other["path"]):
+                    yield "An environment overlaps another project's root or outputs: " + owner["id"] + " and " + other["id"]
+            if first["environment"] is not None and second["environment"] is not None and paths_overlap(first["environment"], second["environment"]):
+                yield "Project environments must not overlap or contain one another: " + first["id"] + " and " + second["id"]
+
+
 def validate_projects(request, guard):
     if not isinstance(request, dict) or not set(request) <= {"projects", "initialize_after"} or "projects" not in request:
         fail("invalid_projects", "Input must contain projects and optionally initialize_after.")
@@ -349,9 +378,7 @@ def validate_projects(request, guard):
         paths.append(path)
         if row["status"] not in ("planned", "active", "archived") or row["language"] not in ("chinese", "english"):
             fail("invalid_projects", "status must be planned/active/archived and language must be chinese/english.")
-        environment = row["environment"]
-        if environment is not None:
-            environment = relative_layout_path(environment, guard, "environment")
+        environment = project_environment(row["environment"], identifier, path, guard)
         outputs, seen = [], set()
         if not isinstance(row["outputs"], list) or len(row["outputs"]) > 500:
             fail("invalid_projects", "outputs must be a list of at most 500 root-relative locations.")
@@ -361,9 +388,9 @@ def validate_projects(request, guard):
                 fail("invalid_projects", "Output paths must be unique.")
             seen.add(path_key(output))
             outputs.append(output)
-        for location in outputs + ([environment] if environment is not None else []):
-            if not path_key(location).startswith(path_key(path) + "/"):
-                fail("invalid_projects", "Environment and output locations must be strictly inside their own project root, using full root-relative paths.")
+        for output in outputs:
+            if not path_key(output).startswith(path_key(path) + "/"):
+                fail("invalid_projects", "Output locations must be strictly inside their own project root, using full root-relative paths.")
         if environment is not None and any(paths_overlap(environment, output) for output in outputs):
             fail("invalid_projects", "Environment and output locations must not overlap.")
         rules = row["rules"]
@@ -377,6 +404,8 @@ def validate_projects(request, guard):
                 fail("invalid_projects", "before must be nonempty exact legacy text without managed project markers.")
             record["before"] = row["before"]
         records.append(record)
+    for reason in project_location_conflicts(records):
+        fail("invalid_projects", reason)
     result = {"projects": records}
     if "initialize_after" in request:
         if not isinstance(request["initialize_after"], str) or PROJECT_MARKER in request["initialize_after"]:
@@ -400,6 +429,23 @@ def project_block(record, newline):
     start = "<!-- project-directory-organizer:project:start id=" + record["id"] + " path=" + record["path"] + " sha256=" + digest(body) + " -->"
     end = "<!-- project-directory-organizer:project:end id=" + record["id"] + " -->"
     return (start + newline).encode("utf-8") + body + (end + newline).encode("utf-8")
+
+
+def registered_environment(body_lines, record, guard):
+    """Recover only the unambiguous environment field from the existing format."""
+    lines = [line for line in body_lines if re.match(r"^\s*\|\s*Environment\s*\|", line, re.IGNORECASE)]
+    prefix, suffix = "| Environment | ", " |"
+    if len(lines) != 1 or not lines[0].startswith(prefix) or not lines[0].endswith(suffix):
+        fail("invalid_projects", "The registered environment field is missing, duplicated, or unknown.")
+    encoded = lines[0][len(prefix):-len(suffix)]
+    if encoded == "None selected; existing tool locations remain unchanged.":
+        return None
+    value = re.sub(r"\\([\\`*_{}\[\]()|#])", r"\1", encoded)
+    value = value.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
+    environment = project_environment(value, record["id"], record["path"], guard)
+    if markdown_text(environment) != encoded:
+        fail("invalid_projects", "The registered environment path is not canonically encoded.")
+    return environment
 
 
 def scan_project_blocks(raw, guard):
@@ -465,6 +511,10 @@ def scan_project_blocks(raw, guard):
                     body_lines = body.decode("utf-8").splitlines()
                     if not body_lines or body_lines[0] != "## Project " + identifier or "| Project id | " + identifier + " |" not in body_lines or "| Root-relative path | " + markdown_text(opened["path"]) + " |" not in body_lines:
                         block("manual_merge_required", "Managed project identity/path markers disagree with their body: " + identifier)
+                    try:
+                        opened["environment"] = registered_environment(body_lines, opened, guard)
+                    except OperationError as error:
+                        block("manual_merge_required", "Existing registered environment needs review: " + identifier + ": " + str(error))
                     opened["end"] = end
                     blocks.append(opened)
                 opened = None
@@ -549,12 +599,12 @@ def make_update_plan(root, request):
                 block("An unmanaged reference to this project needs an exact legacy binding before registration: " + record["id"])
                 break
 
-    resulting_paths = {item["id"].casefold(): item["path"] for item in blocks}
-    resulting_paths.update({row["id"].casefold(): row["path"] for row in request["projects"]})
-    paths = list(resulting_paths.items())
-    for index, (identifier, path) in enumerate(paths):
-        if any(paths_overlap(path, other) for _, other in paths[index + 1:]):
-            block("The proposed root overlaps another registered project: " + identifier)
+    # A missing environment field has already produced a blocker above; never
+    # allow an update (even to that same record) to bypass unknown registrations.
+    resulting = {item["id"].casefold(): item for item in blocks if "environment" in item}
+    resulting.update({row["id"].casefold(): row for row in request["projects"]})
+    for reason in project_location_conflicts(list(resulting.values())):
+        block(reason)
 
     if "initialize_after" in request and (blocks or migrated_spans):
         block("initialize_after is only for the first project area, without existing managed or legacy-migration blocks.")

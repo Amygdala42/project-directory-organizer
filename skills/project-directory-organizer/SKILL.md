@@ -2,7 +2,7 @@
 name: project-directory-organizer
 description: "Use when a user wants to plan project folders, place new files under project rules, maintain directory rules for independent subprojects, organize files after checking movement risks, inventory contents, verify adopted folder rules, or safely delete and restore explicitly selected items. 适用于目录规划、新建文件归类、多子项目隔离与规则同步、风险分流整理、成果归档、盘点、只读规则核对和精确删除恢复。"
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
 ---
 
 # Project Directory Organizer
@@ -27,6 +27,8 @@ metadata:
 ## 必要提问与跨轮继续
 
 规划时逐项确认位置、操作、中文或英文、现有命名差异、用途，以及新建任务的代码、运行数据、分析和独立环境需求。代码、数据、分析、环境分别判断；不做分析不代表不写代码、不产生数据。分析与环境仍各自确认，不能凭“文档任务”代选。成果、批次、共享与现有约束仅在影响本次任务时补问。具体目录名和层级可由助手推荐，不把每个候选都变成前置问题。
+
+已确认需要新建且可自由定位的环境，统一放在已确认主根的 `env/<项目标识>/`；技术目录 `env` 不随业务目录语言翻译。先按项目隔离，实际有多个环境时再细分技术或用途；主项目自身也使用自己的标识。按需创建，既有环境与工具固定位置保留，迁移另行验证。详见[环境与工具结构](references/directory-reference.md#2-主项目环境与工具结构)。
 
 每次只问一个尚未明确且相关的问题，答案只用于明确覆盖的目标；已答不重问，未知不当作否。新增独立子项目重新检查选项及旧约束的适用范围，包括语言、分析、环境、成果与共享；主根和其他项目的选择不代答。冲突先说明并确认处置。完全重新模拟时不继承上一轮选择。
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -90,6 +91,157 @@ class RegistryTests(unittest.TestCase):
         self.call("apply", repeated)
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.call("apply", old, success=False)["code"], "plan_changed")
+
+    def test_central_environment_update_preserves_other_records_and_repeats_as_noop(self):
+        self.initialize([project(environment="alpha/.venv"), project("beta", environment="beta/.venv")])
+        legacy_environment = self.root / "alpha/.venv/keep.txt"
+        legacy_environment.parent.mkdir(parents=True)
+        legacy_environment.write_bytes(b"Existing environment stays in place.")
+        suffix = b"\r\n## Personal appendix\r\nPreserve these exact bytes.\n"
+        self.rules.write_bytes(self.rules.read_bytes() + suffix)
+        before = self.snapshot()
+        beta = before["PROJECT_RULES.md"][before["PROJECT_RULES.md"].index(b"<!-- project-directory-organizer:project:start id=beta"):]
+        record = project(environment="env/alpha")
+        plan = self.plan([record])
+        self.assertTrue(plan["ready_to_apply"], plan["blockers"])
+        self.assertEqual(self.snapshot(), before)
+        self.call("apply", plan)
+        after = self.snapshot()
+        self.assertTrue(after["PROJECT_RULES.md"].startswith(self.original))
+        self.assertTrue(after["PROJECT_RULES.md"].endswith(beta))
+        self.assertIn(b"| Environment | env/alpha |", after["PROJECT_RULES.md"])
+        self.assertEqual(set(after), set(before))
+        self.assertEqual(legacy_environment.read_bytes(), b"Existing environment stays in place.")
+        self.assertFalse((self.root / "env").exists())
+        repeated = self.plan([record])
+        self.assertTrue(repeated["ready_to_apply"], repeated["blockers"])
+        self.assertEqual(repeated["files"][0]["action"], "keep")
+        self.call("apply", repeated)
+        self.assertEqual(self.snapshot(), after)
+
+    def test_central_environment_uses_project_id_for_nested_and_distinct_roots(self):
+        for root, environment in (("work/research", "env/alpha"),
+                                  ("work/research", "env/alpha/python/3.12"),
+                                  ("work/research", "ENV/ALPHA/python"),
+                                  ("work/research", "work/research/.venv")):
+            with self.subTest(root=root, environment=environment):
+                self.rules.write_bytes(self.original)
+                record = project(path=root, environment=environment, outputs=[root + "/reports"])
+                self.initialize([record])
+                repeated = self.plan([record])
+                self.assertTrue(repeated["ready_to_apply"], repeated["blockers"])
+                self.assertEqual(repeated["files"][0]["action"], "keep")
+
+    def test_central_environment_cannot_use_another_id_or_a_prefix_sibling(self):
+        before = self.snapshot()
+        for environment in ("env", "env/beta", "env/beta/python", "env/alphabeta", "env/alpha-other", "other/env/alpha"):
+            with self.subTest(environment=environment):
+                self.call("update-plan", {"projects": [project(environment=environment)]}, success=False)
+        for output in ("env/alpha/reports", "beta/reports", "alphabeta/reports"):
+            with self.subTest(output=output):
+                self.call("update-plan", {"projects": [project(environment="env/alpha", outputs=[output])]}, success=False)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_central_environment_cannot_equal_or_contain_its_own_project_root(self):
+        before = self.snapshot()
+        for root, environment in (("env/alpha", "env/alpha"),
+                                  ("ENV/ALPHA/work", "env/alpha"),
+                                  ("env/alpha/caf\u00e9/work", "env/alpha/cafe\u0301")):
+            with self.subTest(root=root, environment=environment):
+                self.call("update-plan", {"projects": [project(path=root, environment=environment, outputs=[])],
+                                          "initialize_after": self.original.decode("utf-8")},
+                          success=False)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_central_environment_conflicts_with_all_unmentioned_project_locations(self):
+        cases = (("env/alpha", None, []),
+                 ("env/alpha/python", "env/alpha/python/.venv", []),
+                 ("env/alpha/reports", None, ["env/alpha/reports/final"]),
+                 ("ENV/ALPHA", None, []),
+                 ("env/alpha/caf\u00e9/child", None, []))
+        for root, environment, outputs in cases:
+            with self.subTest(root=root, environment=environment, outputs=outputs):
+                self.rules.write_bytes(self.original)
+                self.initialize([project("beta", path=root, environment=environment, outputs=outputs)])
+                before = self.snapshot()
+                record = project(environment="env/alpha/cafe\u0301" if "caf" in root else "env/alpha")
+                plan = self.plan([record])
+                self.assertFalse(plan["ready_to_apply"], plan)
+                self.assertEqual(plan["diff"], "")
+                self.call("apply", plan, success=False)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_new_project_root_cannot_take_an_unmentioned_central_environment(self):
+        self.initialize([project(environment="env/alpha/cafe\u0301")])
+        before = self.snapshot()
+        for root in ("env", "ENV/ALPHA/CAF\u00c9", "env/alpha/caf\u00e9/child"):
+            with self.subTest(root=root):
+                plan = self.plan([project("beta", path=root, outputs=[root + "/reports"])])
+                self.assertFalse(plan["ready_to_apply"], plan)
+                self.call("apply", plan, success=False)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_same_batch_environment_cannot_overlap_another_project(self):
+        for root, environment, outputs in (("env", "env/shared", []),
+                                           ("env/alpha", None, []),
+                                           ("env/alpha/python", "env/alpha/python/.venv", []),
+                                           ("ENV/ALPHA", None, ["ENV/ALPHA/reports"]),
+                                           ("env/alpha/caf\u00e9", None, [])):
+            with self.subTest(root=root, environment=environment):
+                selected = "env/alpha/cafe\u0301" if "caf" in root else "env/alpha"
+                request = {"projects": [project(environment=selected),
+                                         project("beta", path=root, environment=environment, outputs=outputs)],
+                           "initialize_after": self.original.decode("utf-8")}
+                self.call("update-plan", request, success=False)
+                self.assertEqual(self.rules.read_bytes(), self.original)
+
+    def test_effective_registry_uses_replacements_and_keeps_unmentioned_records(self):
+        self.initialize([project(environment="env/alpha"), project("beta"),
+                         project("gamma", environment="env/gamma/python")])
+        before = self.rules.read_bytes()
+        gamma = before[before.index(b"<!-- project-directory-organizer:project:start id=gamma"):]
+        records = [project(environment="env/alpha/python"),
+                   project("beta", path="env/alpha/retired", outputs=["env/alpha/retired/reports"])]
+        plan = self.plan(records)
+        self.assertTrue(plan["ready_to_apply"], plan["blockers"])
+        self.call("apply", plan)
+        self.assertTrue(self.rules.read_bytes().endswith(gamma))
+        self.assertEqual(self.plan(records)["files"][0]["action"], "keep")
+        blocked = self.plan([project("beta", path="ENV/GAMMA/PYTHON/archive", outputs=[])])
+        self.assertFalse(blocked["ready_to_apply"], blocked)
+
+    def test_existing_environment_with_markdown_escapes_keeps_its_collision_boundary(self):
+        self.initialize([project(environment="env/alpha/[cache]_&amp;#(one)",
+                                 purpose="Maintain [data] &amp; <source>",
+                                 rules=["Preserve _names_ & <originals>."],
+                                 outputs=["alpha/reports_[final]", "alpha/exports&(two)", "alpha/a; b"])])
+        self.assertTrue(self.plan([project("beta")])["ready_to_apply"])
+        record = project("beta", path="ENV/ALPHA/[CACHE]_&AMP;#(ONE)/nested", outputs=[])
+        plan = self.plan([record])
+        self.assertFalse(plan["ready_to_apply"], plan)
+
+    def test_unknown_or_invalid_existing_environment_blocks_even_with_matching_digest(self):
+        self.initialize()
+        original = self.rules.read_bytes()
+        variants = ((b"| Environment | None selected; existing tool locations remain unchanged. |",
+                     b"| Runtime | Unknown environment metadata |"),
+                    (b"| Environment | None selected; existing tool locations remain unchanged. |",
+                     b"| Environment | env/beta |"),
+                    (b"| Outputs | alpha/reports |", b"| Outputs | alpha/reports |\r\n| Environment | env/alpha |"))
+        for old, new in variants:
+            with self.subTest(new=new):
+                modified = original.replace(old, new)
+                start = modified.index(b"<!-- project-directory-organizer:project:start")
+                body_start = modified.index(b"\n", start) + 1
+                body_end = modified.index(b"<!-- project-directory-organizer:project:end", body_start)
+                checksum = hashlib.sha256(modified[body_start:body_end]).hexdigest().encode("ascii")
+                modified = modified[:start] + re.sub(rb"sha256=[0-9a-f]{64}", b"sha256=" + checksum,
+                                                     modified[start:body_start], count=1) + modified[body_start:]
+                self.rules.write_bytes(modified)
+                plan = self.plan([project("beta", purpose="A separate update")])
+                self.assertFalse(plan["ready_to_apply"], plan)
+                self.call("apply", plan, success=False)
+                self.assertEqual(self.rules.read_bytes(), modified)
 
     def test_manually_edited_generated_body_blocks_even_another_project_update(self):
         self.initialize([project(), project("beta")])
