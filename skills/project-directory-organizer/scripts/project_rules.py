@@ -168,7 +168,7 @@ def quoted_path(value):
 
 def layout_fields(layout, language):
     rows = layout["directories"]
-    table = "| 相对目录 | 用途 |\n| --- | --- |\n" + "\n".join("| " + markdown_text(row["path"]) + " | " + markdown_text(row["purpose"]) + " |" for row in rows) if rows else "本次未选业务子目录。"
+    table = "| 相对目录 | 用途与收纳边界 |\n| --- | --- |\n" + "\n".join("| " + markdown_text(row["path"]) + " | " + markdown_text(row["purpose"]) + " |" for row in rows) if rows else "本次未选业务子目录。"
     environment = "本次未约定独立环境目录；已有环境和工具原生环境沿用原位置。" if layout["environment"] is None else "本次约定的独立环境目录为" + quoted_path(layout["environment"]) + "；目录预留不代表已安装，已有环境和工具原生环境沿用原位置，实际配置按任务与工具要求确定。"
     outputs = ""
     if layout["outputs"]:
@@ -178,8 +178,8 @@ def layout_fields(layout, language):
             "- 成果位置：" + locations + "。",
             "- 以下约定适用于这些位置中独立归档的报告或导出交付件；工具固定文件名、产物结构和被引用的稳定资源沿用原约定。",
             "- 已有归档结构沿用，独立交付文件沿用已有命名与版本约定。日期、编号、版本和批次层级仅按本项目明确采用的规则使用，不因选择成果位置自动增加。",
-            "- 配套成果保持关联和成套，修订不得静默覆盖已有内容；不为填目录而复制未变化材料。",
-            "- 明确需要自包含交付包时，可将必要依赖复制为交付快照并注明维护源，保留包的完整性，不形成第二维护主库。",
+            "- 成果、阅读说明及明确交付附件按用途与状态组织；制作过程文件另存，用链接、同名或批次标识保持关联。修订不得静默覆盖已有内容，不为填目录而复制未变化材料。",
+            "- 混合格式不要求另建目录；明确需要自包含交付包时，在约定位置复制交付范围内的必要依赖为快照并注明维护源，不形成第二维护主库。",
             "- 稳定维护的代码、数据和参考资料不随日期移动，稳定引用沿用原位置。",
         ))
     originals = "明确保留的输入原件保持内容、名称、位置和包结构；日常维护文件按任务与版本控制约定编辑。"

@@ -1,6 +1,6 @@
 # Project Directory Organizer
 
-版本：**v1.3.0** · [本版更新](docs/releases/v1.3.0.md) · [下载发布包](https://github.com/Amygdala42/project-directory-organizer/releases/tag/v1.3.0)
+当前版本：**v1.3.1** · [本版变更](docs/releases/v1.3.1.md) · [GitHub Release](https://github.com/Amygdala42/project-directory-organizer/releases/tag/v1.3.1)
 
 为 Codex 提供项目目录规划、文件风险检查与整理、成果归档、只读盘点及精确删除恢复功能。支持中文或英文业务目录，结构按当前项目和任务选择，不预设行业、学科或完整目录套件。
 
@@ -12,19 +12,23 @@
 
 当前目标已有答案不重复问，未回答不代选。新增独立项目重新检查全部前置选项及适用约束；主根或旧项目的语言、分析、环境、成果、命名和共享安排不替新项目作答，必要项逐一确认。异步弹窗待答时保持当前回合等待，不发送结束回复或因普通超时重复弹窗；完整计划交付后才结束等待文字指令。模拟不会自动变成实际操作。整理时只移动检查充分且通过的独立组，有风险或无法确认的内容保留原位并给出建议。
 
+文件按“项目归属 → 用途与状态 → 关联 → 位置 → 命名”分类。所有目录都要明确主要内容、必要配套和应另存内容；新建或批量生成前安排好各类文件的角色与位置，整理时依据用途、状态和真实关联检查每条映射及整目录的全部后代，完成后复核并报告保留项。
+
 ## 使用示例
 
 ```text
 $project-directory-organizer 主目录是 D:\Projects\my-project，用于说明文档编写，请先给出新建目录的计划。
 ```
 
-新建项目会生成 `AGENTS.md` 和 `PROJECT_RULES.md`：前者是读取入口，后者保存实际采用的目录、环境归属、命名、成果批次和文件保护规则。环境目录只预留时，不代表已安装软件。选定的报告和导出归档位置沿用已明确适用于当前目标的约定，日期、批次与版本格式仅按实际选择采用，配套交付保持关联；工具生成目录和关联源码素材保留原生结构。
+新建项目会生成 `AGENTS.md` 和 `PROJECT_RULES.md`：前者是读取入口，后者保存实际采用的目录、主要内容与必要配套、应另存内容及其位置、环境归属、命名、成果批次和文件保护规则。环境目录只预留时，不代表已安装软件。选定的报告和导出归档位置沿用已明确适用于当前目标的约定，日期、批次与版本格式仅按实际选择采用；关联源码素材和工具生成目录保留原生结构。
 
 同一主目录可管理多个独立小项目：总规则分别登记各项目的路径、用途、环境及成果约定，处理文件时先确定所属项目。同名配置和相似资料不跨项目合并；共享项需明确使用方。新增、改名或归档小项目时，在同一任务中增量维护对应规则，保留其他项目内容。规则同步由助手执行任务时完成，不是创建文件夹后自动运行的后台监控。详见[多子项目管理](skills/project-directory-organizer/references/subprojects.md)。
 
 持续采集和自动化运行按需要确认批次方式：独立执行分别标识，明确续跑才复用，同一批次可跨日并记录实际时间。日期、运行批次与成果修订版本分别表达，不把一天所有输出混为一批。已有项目只补齐缺失约定，不强建目录或迁移历史文件；详见[运行与交付批次](skills/project-directory-organizer/references/directory-reference.md#5-成果与运行批次)。
 
 [完整使用说明](docs/usage.md) · [技能入口](skills/project-directory-organizer/SKILL.md) · [目录示例](skills/project-directory-organizer/references/examples.md)
+
+v1.3.1 以目录用途和文件实际角色确定内容边界，不设通用格式白名单。报告目录可保存 Markdown 报告、阅读说明、必要配图和明确交付的附件；生成器、内部草稿、运行配置、中间数据、缓存与日志按真实用途另存。“同次生成”或笼统的“相关”不足以证明应放在一起。代码工程可保留配置、README 和素材，数据目录可保留字段说明；混合格式本身不要求另建 `deliverables/`，确需独立打包时才规划交付位置。已有明确项目约定优先，冲突提出精确调整，不自动迁移历史文件。这些规则指导助手执行任务，本版未新增语义检查器或自动写入拦截。详见[创建前分类](docs/usage.md#每次创建文件前分类)。
 
 v1.3.0 将新建且可自由定位的独立环境统一放在已确认主目录的 `env/<项目标识>/`，先按项目区分，再按实际需要细分环境。是否需要独立环境仍单独确认；不需要时不建占位目录。集中存放不代表共享，已有环境与工具固定位置保留并记录。登记和只读核对均支持集中环境归属，成果位置仍限定所属项目。详见[环境规则](skills/project-directory-organizer/references/directory-reference.md#2-主项目环境与工具结构)。
 
@@ -34,15 +38,15 @@ v1.1.0 已提供四项能力：盘点摘要（按直接子目录、扩展名、�
 
 ## 下载与维护
 
-仓库与v1.3.0发布文件均已公开：
+v1.3.1 发布文件：
 
 | 文件 | 适用用途 |
 | --- | --- |
-| [技能包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.0/project-directory-organizer-skill-v1.3.0.zip) | 使用技能；包含完整可安装技能目录，共19个文件。 |
-| [维护包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.0/project-directory-organizer-maintenance-v1.3.0.zip) | 开发与维护；包含发布时的源码、测试和文档，共40个文件，其中skills/下保存技能。 |
-| [SHA256SUMS.txt](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.0/SHA256SUMS.txt) | 核对两个ZIP的SHA-256。 |
+| [技能包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.1/project-directory-organizer-skill-v1.3.1.zip) | 使用技能；包含完整可安装技能目录，共19个文件。 |
+| [维护包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.1/project-directory-organizer-maintenance-v1.3.1.zip) | 开发与维护；包含发布时的源码、测试和文档，其中skills/下保存技能。 |
+| [SHA256SUMS.txt](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.1/SHA256SUMS.txt) | 核对两个ZIP的SHA-256。 |
 
-维护源为仓库的 `skills/project-directory-organizer/`，已安装技能是使用副本。更新时核对版本及全部相对文件路径和SHA-256，不能只比较SKILL.md。发布包固定对应版本标签；main分支可继续补充文档，具体快照和发布核验见[发布记录](docs/releases/v1.3.0.md#发布状态与校验)。
+维护源为仓库的 `skills/project-directory-organizer/`，已安装技能是使用副本。更新时核对版本及全部相对文件路径和SHA-256，不能只比较SKILL.md。发布包固定对应版本标签；main分支可继续补充文档，具体快照和发布核验见[发布记录](docs/releases/v1.3.1.md#发布状态与校验)。
 
 ## 运行条件
 
@@ -69,7 +73,8 @@ v1.1.0 已提供四项能力：盘点摘要（按直接子目录、扩展名、�
 │  │  ├─ v1.0.4.md
 │  │  ├─ v1.1.0.md
 │  │  ├─ v1.2.0.md
-│  │  └─ v1.3.0.md
+│  │  ├─ v1.3.0.md
+│  │  └─ v1.3.1.md
 │  └─ superpowers/
 │     └─ plans/
 │        └─ 2026-10-01-v1.1.0.md
