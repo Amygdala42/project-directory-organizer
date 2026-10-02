@@ -1,8 +1,8 @@
 ---
 name: project-directory-organizer
-description: "Use when a user wants to plan project folders, place new files under project rules, maintain directory rules for independent subprojects, organize files after checking movement risks, inventory contents, verify adopted folder rules, or safely delete and restore explicitly selected items. 适用于目录规划、新建文件归类、多子项目隔离与规则同步、风险分流整理、成果归档、盘点、只读规则核对和精确删除恢复。"
+description: "Use when a user wants to plan project folders, place files under project rules, adopt project maintenance records and archives, maintain rules for independent subprojects, organize files after movement checks, inventory contents, verify adopted rules, or safely delete and restore selected items. 适用于目录规划、文件归类、项目记录与状态归档、多子项目规则维护、风险分流整理、盘点、只读核对和精确删除恢复。"
 metadata:
-  version: "1.3.1"
+  version: "1.4.0"
 ---
 
 # Project Directory Organizer
@@ -15,6 +15,7 @@ metadata:
 
 - 新建主项目、独立子项目或整理已有目录：先读[操作说明](references/operations.md)，承接已有答案与范围。
 - 在已有框架内新建、复制或导出文件：先读项目规则，按下节分类；规则充分时直接完成已授权任务，不重走新建问卷。
+- 采用或维护项目任务记录、当前进展与历史归档：读[项目持续维护](references/project-maintenance.md)。已由用户或适用规则明确采用时，实际改动前更新任务记录，完成后回填结果和进展；仅只读不写记录。
 - 只读盘点：用[盘点说明](references/inventory.md)，大目录可输出摘要并保留遗漏。核对已采用约定时读[规则核对](references/verification.md)，检查项来自实际规则，不来自候选模板。
 - 精确删除、恢复或永久清除：按[安全删除](references/safe-deletion.md)，泛泛整理不包含删除授权。
 
@@ -48,11 +49,15 @@ metadata:
 
 ## 项目规则与持续维护
 
-AGENTS.md简短提醒每次创建或导出前先读PROJECT_RULES.md、确定归属。PROJECT_RULES.md只记录当前实际采用的目录用途及内容边界、每次落盘分类方法、命名和必要保护。目录语言、日期、版本、环境与共享安排按已确认范围记录；不复制技能问答、等待或全部候选。具体格式和基础生成接口见操作说明。
+遵守适用的全局工作流、护栏和技能入口，项目任务不顺带改写全局AGENTS.md。项目AGENTS.md保留项目介绍、关键约束和规则入口；已采用持续维护时增加简短、已核实的当前阶段及任务链接，详细过程留在任务记录。PROJECT_RULES.md集中记录实际采用的目录用途、分类命名、文件保护及维护流程和路径，不复制技能问答、等待或全部候选。具体格式和基础生成接口见操作说明。
+
+持续维护按项目采用：任务、笔记、工具说明、日志、暂存与归档角色可复用现有位置，devlog/note/tasks/tools及各自archives只是可选布局。采用范围、记录位置、当前状态入口和归档条件要写入实际项目规则；新建、修改、生成、整理及归档均遵守。改动前以任务为单位复用或建立记录，完成后更新验证、结果、遗留和下一步；记录本身不递归产生记录。归档依据状态及引用，有效旧规范仍保留维护位置；日志与临时文件区分用途，保留期限不授权自动删除。纯只读或尚在规划时不因此写文件，未采用时不额外建立记录体系。完整约定见[项目持续维护](references/project-maintenance.md)。
+
+技能和模板升级不会自动升级旧项目。授权纳管时，核对项目实际规则并按精确差异合并，保留手写介绍、约束及历史；只处理已确认项目，不扩展到其他目录。生成脚本的keep仅说明保留原文，不能当作维护流程已经更新；项目状态不得从修改时间或未经验证的旧进展推断。
 
 主根已存在时，可用 `python -B scripts/project_rules.py plan` 将已确认布局准备为只读文稿；主根尚不存在或仅模拟时直接拟定正文，不为运行脚本提前建根。已采用的具体约定随布局记录；没有选择的日期层级和版本格式不自动启用。已有文稿以实际规则为准，不按新模板重写。
 
-多个独立项目的登记与增量维护读[多子项目管理](references/subprojects.md)。新增、改名、归档或用途变化时，目录和相应规则差异纳入同一计划，按授权一并完成，保留其他项目。普通内容新增沿用当前规则，不重复登记；脚本的keep不等于已同步新增项目。持续运行涉及批次时，按[批次参考](references/directory-reference.md#5-成果与运行批次)补齐相关选择，保留独立执行、续跑和跨日关联。
+多个独立项目的登记与增量维护读[多子项目管理](references/subprojects.md)。新增、改名、归档或用途变化时，目录和相应规则差异纳入同一计划，按授权一并完成，保留其他项目。普通内容新增沿用当前规则，不重复登记；已采用持续维护时仍复用对应任务记录。脚本的keep不等于已同步新增项目。持续运行涉及批次时，按[批次参考](references/directory-reference.md#5-成果与运行批次)补齐相关选择，保留独立执行、续跑和跨日关联。
 
 ## 整理、执行与结果
 

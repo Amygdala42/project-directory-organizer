@@ -1,14 +1,14 @@
 # Project Directory Organizer
 
-适用版本：**v1.3.1**。变更见[本版记录](releases/v1.3.1.md)。
+适用版本：**v1.4.0**。变更见[本版记录](releases/v1.4.0.md)。
 
 ## 获取与维护
 
-从 [v1.3.1 Release](https://github.com/Amygdala42/project-directory-organizer/releases/tag/v1.3.1) 获取发布文件：普通使用选择[技能包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.1/project-directory-organizer-skill-v1.3.1.zip)，修改源码和执行开发测试选择[维护包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.1/project-directory-organizer-maintenance-v1.3.1.zip)。两者解压后的顶层目录均名为project-directory-organizer，但内容不同：技能包直接包含SKILL.md、agents、assets、references和scripts；维护包还包含README、VERSION、docs、tests，技能位于其中的skills/project-directory-organizer。
+从 [v1.4.0 Release](https://github.com/Amygdala42/project-directory-organizer/releases/tag/v1.4.0) 获取发布文件：普通使用选择[技能包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.4.0/project-directory-organizer-skill-v1.4.0.zip)，修改源码和执行开发测试选择[维护包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.4.0/project-directory-organizer-maintenance-v1.4.0.zip)。两者解压后的顶层目录均名为project-directory-organizer，但内容不同：技能包直接包含SKILL.md、agents、assets、references和scripts；维护包还包含README、VERSION、docs、tests，技能位于其中的skills/project-directory-organizer。
 
-持续维护以仓库中的技能目录为唯一维护源，再将已验证的同版内容同步到安装副本。核对版本后，还需比较全部相对路径与文件SHA-256；本版技能包包含19个文件。维护仓库根的AGENTS.md和PROJECT_RULES.md用于维护本仓库，技能内assets/templates中的同名文件用于生成目标项目规则，二者职责不同。
+持续维护以仓库中的技能目录为唯一维护源，再将已验证的同版内容同步到安装副本。核对版本后，还需比较全部相对路径与文件SHA-256；本版技能包包含20个文件。维护仓库根的AGENTS.md和PROJECT_RULES.md用于维护本仓库，技能内assets/templates中的同名文件用于生成目标项目规则，二者职责不同。
 
-下载后可将ZIP的SHA-256与同版 [SHA256SUMS.txt](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.1/SHA256SUMS.txt) 比较。发布包对应固定标签快照，维护分支继续更新；校验值与验证范围集中记录在[发布状态与校验](releases/v1.3.1.md#发布状态与校验)。
+下载后可将ZIP的SHA-256与同版 [SHA256SUMS.txt](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.4.0/SHA256SUMS.txt) 比较。发布包对应固定标签快照，维护分支继续更新；校验值与验证范围集中记录在[发布状态与校验](releases/v1.4.0.md#发布状态与校验)。
 
 ## 使用方式
 
@@ -30,7 +30,7 @@
 
 根据用途、查找方式和现有结构推荐目录。第一版可覆盖资料、工作、素材、审阅、交付和记录等相关环节，标明建议保留与可删减扩展；开发、数据与分析位置按各自答案选择；新建且可自由定位的独立环境统一放在已确认主根的 `env/<项目标识>/`，已有环境和工具固定位置沿用。没有适用需求的候选不创建，已有工程沿用其原生结构。语言沿用本轮明确选择，未知时先弹窗询问；发现语言差异，前置弹窗确定处理意向，再在计划中列改名建议与风险，不自动改名。
 
-实际新建时，主项目 AGENTS.md 保留创建前规则入口、目标子项目范围和简短文件保护原则，以相对链接引用 PROJECT_RULES.md。项目短规则记录实际约定、每个目录的主要内容、必要配套和应另存内容及其位置，并说明每次创建前分类、归属与规则维护、文件保护及适用的成果安排；未选择成果输出位置时省略成果归档节。只写已选布局及实际用途，目录表可在同一项目内归组；通用候选、中英映射、环境可选类型及详细操作流程留在技能中按需读取。
+实际新建时，主项目 AGENTS.md 保留规则入口、目标子项目范围和简短文件保护原则，以相对链接引用 PROJECT_RULES.md；已知的项目介绍、关键约束和简短真实进展可保留在入口，详细任务链接到对应记录，不编造最新状态。项目短规则记录实际约定、每个目录的主要内容、必要配套和应另存内容及其位置，并说明每次创建前分类、归属与规则维护、文件保护及适用的成果安排；未选择成果输出位置时省略成果归档节。只写已选布局及实际用途，目录表可在同一项目内归组；通用候选、中英映射、环境可选类型及详细操作流程留在技能中按需读取。
 
 项目约定保留目录语言、时区和实际环境归属。中文选择覆盖当前目标的自建业务目录层级，工具要求的原生结构保留并说明；此选择不决定文档正文或文件名语言。环境预留只是位置，不代表已安装。可独立归档的报告和分析导出沿用已明确适用于当前目标的约定，日期、编号、分隔符、版本与批次层级按实际选择采用；关联材料按各自目录边界保存并保持引用。源码、设计源文件、关联素材及工具生成目录沿用原生布局，不强套日期或 v01 命名。
 
@@ -39,6 +39,35 @@
 交付批次也不等于自然日：同日同用途的独立批次需区分，同一不可拆交付批次跨日完成时保留PPT/PDF及必要配套关系，记录实际产出时间。日常增量只保存新增/修订；确需独立打包的自包含交付件才规划 `deliverables/` 或现有布局中的对应位置，可复制必要依赖为快照并注明维护源。HTML、JS、图片等混合格式本身不是另建交付目录的理由：用于阅读同一报告的资源可随报告保存，用于生成报告的源码仍有自己的维护位置。细节与例子见[运行与交付批次](../skills/project-directory-organizer/references/directory-reference.md#5-成果与运行批次)。
 
 弹窗、等待、重发、模拟及对话流程只保留在技能内部，不写入这两份项目规则。没有结构或规则变更时，已有定制 PROJECT_RULES.md 保持原样，不因模板更新自动覆盖、追加通用内容或要求补齐候选目录；新增项目、改变用途或用户要求修订时，在同一计划中按现有内容提出相关差异，保留其余约定。
+
+## 项目持续维护
+
+用户或适用规则明确采用后，将本项目的维护约定写入 PROJECT_RULES.md，并在 AGENTS.md 保留读取入口。新建项目在已授权的创建范围内生成这些规则；既有项目按明确范围精确合并，保留手写介绍、约束和其他项目内容。没有采用时沿用现有工作流，不因安装 v1.4.0 就创建 devlog 或补写历史记录。
+
+| 层级或用途 | 保存内容与边界 |
+| --- | --- |
+| 适用的全局 AGENTS.md | 通用工作流、护栏和 Skill 入口；项目操作遵守其适用内容，修改当前项目不顺带改写全局配置或维护全局索引 |
+| 项目 AGENTS.md | 项目介绍、关键约束、当前阶段和阅读入口；保留简短且有依据的进展及任务链接，不复制完整历史日志 |
+| PROJECT_RULES.md | 项目目录用途、分类、命名、维护流程和归档主约定；项目入口通过链接引用，减少重复规则 |
+| 记录角色 note | 调查、想法、讨论和决策依据；可采用 devlog/note，也可复用已有设计或研究记录位置 |
+| 记录角色 tasks | 任务目标、改动范围、执行计划、结果、验证和下一步；可采用 devlog/tasks，也可复用已有开发计划目录 |
+| 记录角色 tools | 工具用法、环境配置和维护说明；可采用 devlog/tools，工具源码及依赖仍按工程关系保存 |
+| 各类 archives | 已完成、被替代或失效的记录，保留状态、来源、替代关系和必要引用；按需要创建，不预建空目录 |
+| logs 与临时工作 | 运行、诊断记录及执行/恢复凭证按记录用途保存；临时材料、缓存、转换中间产物使用已约定暂存位置，注明用途、保留方式和清理条件 |
+
+目录名与层级按项目语言及现有布局选择。这些是职责示例，不是所有项目必须建立的树。若项目希望把临时材料统一放入 logs，则用明确子区区分运行记录与暂存，不把 logs 当成任意文件的兜底位置。本维护仓库复用 docs/superpowers/plans 记录任务及决策，docs 保存使用说明，docs/releases 保存发布记录，详细测试输出及临时产物留在系统临时目录。
+
+采用后的实际操作遵循以下流程，覆盖新建、修改、复制、导出、整理、归档和已获单独授权的删除；仅查看、盘点、审阅和计划讨论保持只读：
+
+1. 读取适用入口与规则，确定目标项目、任务和文件归属。在实际改动前复用或创建对应任务记录，简述目标、范围、计划及验证方式；新项目尚无记录目录时，在获准创建的范围内先建立承载位置与首份记录，再继续其他改动。
+2. 同一任务持续更新同一份记录；小改动可简短追加，记录自身的更新不再递归创建记录。已有具体执行授权继续有效，记录不增加一轮逐文件确认，也不扩大改动范围。
+3. 按“归属 → 用途与状态 → 关联 → 位置 → 命名”放置文件。执行中记录影响结果的重要决定，保留引用、工程依赖和原件；记录不代替具体工具要求的摘要、执行日志或恢复凭证。
+4. 完成或中止时回填实际结果、验证范围、未完成项与下一步，同步更新 AGENTS.md 的简短当前状态、更新时间和任务链接。没有执行的验证保持未验证，不把待办写成完成。
+5. 归档前确认记录已完成、被替代或失效，并检查引用。旧但有效的规范保持维护位置；在已授权范围内归档时保留关联，更新入口和引用。保留期限或“临时”标记本身不构成移动、删除或永久清除授权。
+
+升级技能只更新技能和模板，不会自动升级所有旧项目。用户要求同步指定项目时，先读取实际规则和手写内容，提出相关差异并在已有授权范围内合并；基础 plan 返回 keep 仅说明保留了文件，不能证明持续维护条款已落地。完成后读取真实规则、入口和任务记录核对。普通文件任务不趁机改造无关项目或规则。
+
+这些条款指导助手执行项目任务，不是后台程序。其他软件和手工操作产生的文件仍需后续核对；本版没有新增 schema、脚本参数、自动归档器、语义检查器或系统级写入拦截。完整流程见[项目持续维护参考](../skills/project-directory-organizer/references/project-maintenance.md)。
 
 ## 每次创建文件前分类
 
@@ -99,7 +128,7 @@ PROJECT_RULES.md登记各项目的标识、相对根路径、用途和状态，�
 | environment | 本次约定的独立环境目录相对路径，须在 directories 明列；新建且可自由定位时采用 `env/<项目标识>`。未选择时为 `null`，不表示项目没有已有环境；旧布局输入保持兼容 |
 | outputs | 明确选定的报告或导出归档位置相对路径列表，须在 directories 明列；没有则为空列表。不要把 build/dist 等工具生成目录或关联源码素材作为归档位置 |
 | originals | 已确认原件的项目相对路径列表，可为目录或文件（如根内 contract.pdf），不要求包含在目录用途表中 |
-| rules（可选） | 已确认的具体分类、命名或批次约定列表；最多500条单行文本，每条最多1000字符，拒绝控制字符及内部保留标记；省略或空列表不补设业务约定 |
+| rules（可选） | 已确认的具体分类、命名、批次或已采用的持续维护约定列表，可写明任务记录路径及维护流程；最多500条单行文本，每条最多1000字符，拒绝控制字符及内部保留标记；省略或空列表不补设业务约定 |
 
 `TIMEZONE` 替换为已知项目约定或当前会话的时区；没有固定地区默认值。助手从已有上下文取得，不为此增加常规问卷；确实无法确定时先在计划中标为待定，不编造时区。
 
@@ -125,6 +154,7 @@ PROJECT_RULES.md登记各项目的标识、相对根路径、用途和状态，�
 
 - [技能入口](../skills/project-directory-organizer/SKILL.md)
 - [规划与文字反馈](../skills/project-directory-organizer/references/operations.md)
+- [项目持续维护](../skills/project-directory-organizer/references/project-maintenance.md)
 - [项目短规则模板](../skills/project-directory-organizer/assets/templates/PROJECT_RULES.md)
 - [分类判断、命名与材料处理参考](../skills/project-directory-organizer/references/directory-reference.md)
 - [整理、移动与回退](../skills/project-directory-organizer/references/moving.md)
