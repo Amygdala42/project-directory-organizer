@@ -1,6 +1,6 @@
 # Project Directory Organizer
 
-版本：**v1.3.0** · [本版更新](docs/releases/v1.3.0.md)
+版本：**v1.3.0** · [本版更新](docs/releases/v1.3.0.md) · [下载发布包](https://github.com/Amygdala42/project-directory-organizer/releases/tag/v1.3.0)
 
 为 Codex 提供项目目录规划、文件风险检查与整理、成果归档、只读盘点及精确删除恢复功能。支持中文或英文业务目录，结构按当前项目和任务选择，不预设行业、学科或完整目录套件。
 
@@ -31,6 +31,18 @@ v1.3.0 将新建且可自由定位的独立环境统一放在已确认主目录�
 v1.2.0 保留必要的逐项提问，推荐可删减的完整框架，按任务决定分类与名称。每次新建、复制、下载或导出文件前，先确定项目归属、用途与状态、文件关联、位置和名称；已有规则足够时直接完成已授权任务，缺项才补充确认。生成的项目规则不再默认套用日期批次、v01或英文连字符格式，已确认的具体约定可随布局记录。
 
 v1.1.0 已提供四项能力：盘点摘要（按直接子目录、扩展名、修改时间分组及文件榜单）、已确认规则的只读核对、已有项目登记的受保护局部更新，以及可裁剪的内容创作/交付/资料库范例。只读检查不会创建计划文件或修复偏差；规则更新继续通过计划、摘要和写前状态检查，保护手写条款与其他项目。
+
+## 下载与维护
+
+仓库与v1.3.0发布文件均已公开：
+
+| 文件 | 适用用途 |
+| --- | --- |
+| [技能包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.0/project-directory-organizer-skill-v1.3.0.zip) | 使用技能；包含完整可安装技能目录，共19个文件。 |
+| [维护包](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.0/project-directory-organizer-maintenance-v1.3.0.zip) | 开发与维护；包含发布时的源码、测试和文档，共40个文件，其中skills/下保存技能。 |
+| [SHA256SUMS.txt](https://github.com/Amygdala42/project-directory-organizer/releases/download/v1.3.0/SHA256SUMS.txt) | 核对两个ZIP的SHA-256。 |
+
+维护源为仓库的 `skills/project-directory-organizer/`，已安装技能是使用副本。更新时核对版本及全部相对文件路径和SHA-256，不能只比较SKILL.md。发布包固定对应版本标签；main分支可继续补充文档，具体快照和发布核验见[发布记录](docs/releases/v1.3.0.md#发布状态与校验)。
 
 ## 运行条件
 

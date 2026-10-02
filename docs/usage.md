@@ -2,6 +2,14 @@
 
 适用版本：**v1.3.0**。变更见[发布说明](releases/v1.3.0.md)。
 
+## 获取与维护
+
+从公开的 [v1.3.0 Release](https://github.com/Amygdala42/project-directory-organizer/releases/tag/v1.3.0) 获取发布文件：普通使用选择技能包，修改源码和执行开发测试选择维护包。两者解压后的顶层目录均名为project-directory-organizer，但内容不同：技能包直接包含SKILL.md、agents、assets、references和scripts；维护包还包含README、VERSION、docs、tests，技能位于其中的skills/project-directory-organizer。
+
+持续维护以仓库中的技能目录为唯一维护源，再将已验证的同版内容同步到安装副本。核对版本后，还需比较全部相对路径与文件SHA-256；v1.3.0的技能共有19个文件。维护仓库根的AGENTS.md和PROJECT_RULES.md用于维护本仓库，技能内assets/templates中的同名文件用于生成目标项目规则，二者职责不同。
+
+下载后可将ZIP的SHA-256与同版SHA256SUMS.txt比较。发布包对应固定标签快照，后续文档补充保存在main分支；本次发布后的校验值与验证范围集中记录在[发布状态与校验](releases/v1.3.0.md#发布状态与校验)。
+
 ## 使用方式
 
 计划前按顺序用简短弹窗收集信息：位置 → 新建或整理 → 目录语言 →（存在差异时）现有名称如何处理 →（用途不明时）补问用途 →（新建任务）逐项确认未明的代码、运行数据和分析成果需求 →（新建任务）独立环境 → 其他影响本次工作的选项或旧约束。用途问题只问缺失信息，不要求正式主题名称。不做数据分析不等于不需要代码、运行数据或环境；已明确的需求不重问，相关未知项每次只问一个。只读盘点已知范围内的内容不触发新建问卷。
